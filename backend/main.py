@@ -1,4 +1,4 @@
-from scanner import NPScanner, SAEItem, FeatureBias
+from scanner import NPScanner
 from steerer import NPSteerer
 from transformer_lens import HookedTransformer
 import transformer_lens
@@ -6,15 +6,10 @@ from sae_lens import SAE
 
 
 model = HookedTransformer.from_pretrained("phi-2", device="cuda:0")
-saes:list[SAEItem] = []
+layerIDs:list[str] = []
 for i in range(32):
-    saes.append(
-        SAEItem(
-            None,
-            "blocks." + str(i) + ".hook_resid_pre"
-        )
-    )
-scanner = NPScanner(saes=saes, model=model) 
+    layerIDs.append("blocks." + str(i) + ".hook_resid_pre")
+scanner = NPScanner(layerIDs=layerIDs, model=model) 
 
 # Test it
 positive = [

@@ -14,24 +14,10 @@ class FeatureBias:
         vector (Tensor): The feature
         bias (float): The bias
         layer (int): The layer
-        sae (SAE): The SAE of this feature
     """
     vector:Tensor
     bias:float
     layer:int
-    sae:SAE
-    
-@dataclass
-class SAEItem:
-    """
-    A SAEItem is an SAE and its id.
-    
-    Attributes:
-        sae (SAE): The SAE
-        id (str): The sae_id passed when creating the SAE.
-    """
-    sae:SAE
-    id:str
     
 @dataclass
 class NPScanResult:
@@ -48,9 +34,9 @@ class NPScanResult:
     highestFeature:Tensor
 
 class NPScanner:
-    def __init__(self, model:HookedTransformer, saes:list[SAEItem]):
+    def __init__(self, model:HookedTransformer, layerIDs:list[str]):
         self.model = model
-        self.saes = saes
+        self.layerIDs = layerIDs
     
     def get_activations(self, input:str, cache:ActivationCache, layer:int, skip_tokens:list[str]) -> Tensor:
         """
@@ -141,7 +127,7 @@ class NPScanner:
         Returns:
             FeatureBias
         """
-        return FeatureBias(scanRes.highestFeature, bias, scanRes.highestLayer, self.saes[scanRes.highestLayer].sae)
+        return FeatureBias(scanRes.highestFeature, bias, scanRes.highestLayer)
     
     def get_ids(self) -> list[str]:
         return [sae.id for sae in self.saes]

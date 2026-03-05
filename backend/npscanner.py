@@ -25,11 +25,11 @@ class NPScanResult:
     The result of NPScanner.scan_layers().
     
     Attributes:
-        layerDiffs (list[Tensor]): List of layer differences
+        layerDiffs (list[list[Tensor]]): List of neuron differences in each layer
         highestLayer (int): Index of highest layer
         highestFeature (Tensor): highest layer feature
     """
-    layerDiffs:list[Tensor]
+    layerDiffs:list[list[Tensor]]
     highestLayer:int
     highestFeature:Tensor
 
@@ -89,11 +89,13 @@ class NPScanner:
         layer_diffs:list[Tensor] = []
         pos_caches:list[ActivationCache] = [self.model.run_with_cache(self.model.to_tokens(input))[1] for input in pos_inputs]
         neg_caches:list[ActivationCache] = [self.model.run_with_cache(self.model.to_tokens(input))[1] for input in neg_inputs]
+        highest_layer = 0
+        highest_feature = None
         # For each layer...
         for layer in range(numLayers):
             pos_features:list[Tensor] = []
             neg_features:list[Tensor] = []
-            # ...get mean positive and negative activations, and...
+            # ...get mean positive and negative activations, ...
             for i in range(len(pos_caches)):
                 input = pos_inputs[i]
                 cache = pos_caches[i]
@@ -104,20 +106,13 @@ class NPScanner:
                 cache = neg_caches[i]
                 neg_features.append(self.get_activations(input, cache, layer, skip_tokens))
             neg_mean:Tensor = torch.stack(neg_features).mean(dim=0)
-            # ...calculate and append the difference between them.
+            # ...calculate and append the difference between them, and...
             diff = pos_mean - neg_mean
-            layer_diffs.append(diff)
-        # Find highest layer
-        highest_layer = 0
-        highest_feature = None
-        for i, diff in enumerate(layer_diffs):
-            feature = diff
-            if (highest_feature is None):
-                highest_feature = feature
-                continue
-            if feature.norm().item() > highest_feature.norm().item():
-                highest_feature = feature
-                highest_layer = i
+            layer_diffs.append([diff[i] for i in range(diff.shape[0])])
+            # ...use the raw diff tensor for norm comparison.
+            if highest_feature is None or diff.norm().item() > highest_feature.norm().item():
+                highest_feature = diff
+                highest_layer = layer
         return NPScanResult(layer_diffs, highest_layer, highest_feature)
     
     def to_feature_bias(self, scanRes:NPScanResult, bias:float = 1.0) -> FeatureBias:

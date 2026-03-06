@@ -1,6 +1,8 @@
 from npscanner import NPScanner, FeatureBias
 from transformer_lens import HookedTransformer
-
+import torch.nn.functional as F
+from torch import Tensor
+import re
 class NPSteerer:
     """
     Steers the currently hooked model in the direction * bias of all FeatureBias in the biases array.
@@ -9,14 +11,22 @@ class NPSteerer:
         self.biases = biases
         self.curHandles = []
         self.model = None
-        
-    def model_fwd(self, layer:int):
-        def hook(module, input, output):
-            for bias in self.biases:
-                if bias.layer == layer:
-                    output += bias.vector * bias.bias
-            return output
-        return hook
+    
+    def evaluate_condition(self, expr:str, biases:list[FeatureBias], residual:Tensor, threshold:float) -> bool:
+        # replace each index with True/False based on cosine similarity
+        def check(idx:int) -> bool:
+            vec = biases[idx].vector
+            resid_mean = residual[0].mean(dim=0)
+            sim = F.cosine_similarity(resid_mean.unsqueeze(0), vec.unsqueeze(0))
+            return sim.item() > threshold
+
+        # substitute all numbers with bool results
+        def replace_index(match):
+            return str(check(int(match.group())))
+
+        evaluated = re.sub(r'\d+', replace_index, expr)
+        evaluated = evaluated.replace("AND", "and").replace("OR", "or").replace("NOT", "not")
+        return eval(evaluated)
     
     
     def hookOnModel(self, model:HookedTransformer, unhook:bool = True) -> "NPSteerer":
@@ -43,8 +53,10 @@ class NPSteerer:
         for layer, biases in biasesByLayer.items():
             def make_hook(fBiases:list[FeatureBias]):
                 def hook(module, input, output):
+                    resid = input[0]
                     for bias in fBiases:
-                        output += bias.vector * bias.bias
+                        if bias.condition is None or self.evaluate_condition(bias.condition, self.biases, resid, bias.condition_threshold):
+                            output += bias.vector * bias.bias
                     return output
                 return hook
             self.curHandles.append(

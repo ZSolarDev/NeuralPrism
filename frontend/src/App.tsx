@@ -4,10 +4,9 @@ import { useState, useEffect } from 'react'
 import ScanWindow from "./ui/ScanWindow";
 import NPTopBar from "./ui/elements/NPTopBar";
 import NPButton from "./ui/elements/NPButton";
-import { Input } from "@/components/ui/input"
 
-let scanRes: ScanResult = {
-    name: "Medieval - Scanning...",
+const EMPTY_SCAN: ScanResult = {
+    name: "",
     highest_layer: 0,
     layer_diffs: [],
     vector: []
@@ -21,23 +20,6 @@ export async function InitApp(setStatus: (s: string) => void) {
         await Client.loadModel("phi-2")
         await Client.getModelInfo()
     }
-
-    const saved = localStorage.getItem('scanResults')
-    if (saved) {
-        scanRes = JSON.parse(saved)
-    } else {
-        setStatus("Scanning...")
-        scanRes = await Client.scan("Medieval", [
-            "The king sat on his throne",
-            "The queen wore her crown",
-            "The prince rode his horse"
-        ],[
-            "The programmer wrote some code",
-            "The dog ran across the field",
-            "The chef cooked a meal",
-        ], 1)
-        localStorage.setItem('scanResults', JSON.stringify(scanRes))
-    }
     setStatus("")
 }
 
@@ -46,6 +28,7 @@ function App() {
     const [nPerLayer, setNPerLayer] = useState([0])
     const [scanWindowOpen, setScanWindowOpen] = useState(false)
     const [status, setStatus] = useState("Loading...")
+    const [scanRes, setScanRes] = useState<ScanResult>(EMPTY_SCAN)
 
     useEffect(() => {
         InitApp(setStatus).then(() => {
@@ -56,11 +39,21 @@ function App() {
 
     return (
         <div style={{ width: "100%", height: "100%", position: "relative" }}>
-            <NetworkVisualizer numLayers={numLayers} nPerLayer={nPerLayer} nActivations={scanRes.layer_diffs} highestLayer={scanRes.highest_layer}/>
+            <NetworkVisualizer
+                numLayers={numLayers}
+                nPerLayer={nPerLayer}
+                nActivations={scanRes.layer_diffs}
+                highestLayer={scanRes.highest_layer}
+            />
             <NPTopBar>
                 <NPButton onClick={() => setScanWindowOpen(true)}>Scan</NPButton>
             </NPTopBar>
-            {scanWindowOpen && <ScanWindow onClose={() => setScanWindowOpen(false)} />}
+            {scanWindowOpen && (
+                <ScanWindow
+                    onClose={() => setScanWindowOpen(false)}
+                    onScanUpdate={setScanRes}
+                />
+            )}
             {status && (
                 <div style={{
                     position: "absolute",

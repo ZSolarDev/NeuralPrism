@@ -19,6 +19,9 @@ class NPProfile:
             metadata[f"{i}_name"] = b.name
             metadata[f"{i}_bias"] = str(b.bias)
             metadata[f"{i}_layer"] = str(b.layer)
+            metadata[f"{i}_condition"] = b.condition or ""
+            metadata[f"{i}_condition_threshold"] = str(b.condition_threshold)
+            
         save_file(tensors, path, metadata)
         
     @classmethod
@@ -31,7 +34,16 @@ class NPProfile:
             tensors = {k: f.get_tensor(k) for k in f.keys()}
         biases = []
         for i in range(len(tensors.keys())):
-            bias = FeatureBias(tensors[str(i)], float(metadata[f"{i}_bias"]), int(metadata[f"{i}_layer"]), metadata[f"{i}_name"])
+            condition_str = metadata.get(f"{i}_condition", "")
+            condition_threshold = float(metadata.get(f"{i}_condition_threshold", "0.3"))
+            bias = FeatureBias(
+                tensors[str(i)],
+                float(metadata[f"{i}_bias"]),
+                int(metadata[f"{i}_layer"]),
+                metadata[f"{i}_name"],
+                condition=condition_str if condition_str else None,
+                condition_threshold=condition_threshold
+            )
             biases.append(bias)
         return cls(biases)
         

@@ -7,7 +7,8 @@ export class Model {
 
 export enum Task {
     LoadingModel = "Loading Model",
-    LoadingModelInfo = "Loading Model Info"
+    LoadingModelInfo = "Loading Model Info",
+    Scanning = "Scanning"
 }
 
 export type TaskHandle = {
@@ -22,6 +23,19 @@ export type ScanResult = {
     layer_diffs:number[][]
     vector:number[]
 }
+
+export type ScanProgress = {
+    running: boolean
+    done: boolean
+    current_input: number
+    total_inputs: number
+    layer_diffs: number[][]
+    highest_layer: number
+    vector: number[]
+    name: string
+}
+
+export type ScanProgressCallback = (progress: ScanProgress) => void
 
 export class Busy {
     public currentTasks:Map<number, Task> = new Map()
@@ -101,10 +115,23 @@ export class Client {
         return handle
     }
 
-    public static async scan(name:string, posInputs:string[], negInputs:string[], bias:number = 0.0):Promise<ScanResult> {
-        if (Client.model.loaded === false)
+    /**
+     * Starts a scan and polls /scan_progress, firing onProgress each tick.
+     * Resolves with the final ScanResult when done.
+     */
+    public static async scan(
+        name: string,
+        posInputs: string[],
+        negInputs: string[],
+        bias: number = 0.0,
+        onProgress?: ScanProgressCallback,
+        pollInterval: number = 200
+    ): Promise<ScanResult> {
+        if (!Client.model.loaded)
             throw new Error("Model not loaded")
-        const res = await fetch("http://localhost:8000/scan", {
+
+        // kick off the scan (returns immediately with {started: true})
+        await fetch("http://localhost:8000/scan", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({
@@ -114,12 +141,42 @@ export class Client {
                 bias
             })
         })
-        const data = await res.json()
-        return {
-            name: data.name,
-            highest_layer: data.highest_layer,
-            layer_diffs: data.layer_diffs,
-            vector: data.vector
+
+        // poll until done
+        while (true) {
+            await new Promise(r => setTimeout(r, pollInterval))
+
+            const res = await fetch("http://localhost:8000/scan_progress")
+            const progress: ScanProgress = await res.json()
+
+            onProgress?.(progress)
+
+            if (progress.done) {
+                return {
+                    name: progress.name,
+                    highest_layer: progress.highest_layer,
+                    layer_diffs: progress.layer_diffs,
+                    vector: progress.vector
+                }
+            }
         }
+    }
+
+    public static scanWithHandle(
+        name: string,
+        posInputs: string[],
+        negInputs: string[],
+        bias: number = 0.0,
+        onProgress?: ScanProgressCallback
+    ): { handle: TaskHandle; result: Promise<ScanResult> } {
+        const handle = Client.busy.addTask(Task.Scanning)
+        const result = (async () => {
+            try {
+                return await Client.scan(name, posInputs, negInputs, bias, onProgress)
+            } finally {
+                Client.busy.removeTask(handle)
+            }
+        })()
+        return { handle, result }
     }
 }

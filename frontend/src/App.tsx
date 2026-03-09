@@ -38,6 +38,7 @@ function App() {
     const [modelName, setModelName] = useState("")
     const [scaledActivations, setScaledActivations] = useState(true)
     const [biases, setProjectBiases] = useState(project.biases)
+    const [isSteering, setIsSteering] = useState(false)
 
     const setBiases = (pBiases:FeatureBias[]) => {
         setProjectBiases(pBiases)
@@ -76,26 +77,37 @@ function App() {
             <NPTopBar>
                 <p>Current model loaded: {modelName}</p>
                 <NPButton onClick={() => setModelLoaderWindowOpen(true)}>Load Model</NPButton>
-                <NPButton
-                    onClick={() => setDifferentialScanWindowOpen(true)}
-                    disabled={!Client.model.loaded}
-                >
-                    Differential Scan
-                </NPButton>
-                <NPButton onClick={() => setScaledActivations(!scaledActivations)}>Scaled Activations [{scaledActivations ? "ON" : "OFF"}]</NPButton>
-                <NPButton onClick={() => setBiasManagerWindowOpen(true)}>Bias Manager</NPButton>
-                <NPButton
-                    onClick={() => setQualityTestWindowOpen(true)}
-                    disabled={!Client.model.loaded}
-                >
-                    Quality Test
-                </NPButton>
-                <NPButton
-                    onClick={() => setTokenActivationWindowOpen(true)}
-                    disabled={!Client.model.loaded}
-                >
-                    Token Activations
-                </NPButton>
+                <NPButton onClick={() => setIsSteering(!isSteering)}>Steering [{isSteering ? "ON" : "OFF"}]</NPButton>
+                {!isSteering ? (
+                        <>
+                            <NPButton
+                                onClick={() => setDifferentialScanWindowOpen(true)}
+                                disabled={!Client.model.loaded}
+                            >
+                                Differential Scan
+                            </NPButton>
+                            <NPButton onClick={() => setScaledActivations(!scaledActivations)}>Scaled Activations [{scaledActivations ? "ON" : "OFF"}]</NPButton>
+                            <NPButton onClick={() => setBiasManagerWindowOpen(true)}>Bias Manager</NPButton>
+                            <NPButton
+                                onClick={() => setQualityTestWindowOpen(true)}
+                                disabled={!Client.model.loaded}
+                            >
+                                Quality Test
+                            </NPButton>
+                            <NPButton
+                                onClick={() => setTokenActivationWindowOpen(true)}
+                                disabled={!Client.model.loaded}
+                            >
+                                Token Activations
+                            </NPButton>
+                        </>
+                    ) : (
+                        <>
+                            <NPButton disabled>Infrence</NPButton>
+                            <NPButton disabled>Infrence Status</NPButton>
+                        </>
+                    )
+                }
             </NPTopBar>
             {modelLoaderWindowOpen && (
                 <ModelLoaderWindow

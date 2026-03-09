@@ -1,5 +1,5 @@
 from npscanner import FeatureBias
-from safetensors.torch import save_file, safe_open
+from safetensors.torch import save_file, safe_open, save as safetensors_save
 
 class NPProfile:
     """
@@ -7,8 +7,8 @@ class NPProfile:
     """
     def __init__(self, biases:list[FeatureBias]):
         self.biases = biases
-    
-    def save(self, path:str):
+        
+    def save(self, path):
         """
         Saves this profile to the given path via safetensors.
         """
@@ -20,9 +20,12 @@ class NPProfile:
             metadata[f"{i}_bias"] = str(b.bias)
             metadata[f"{i}_layer"] = str(b.layer)
             metadata[f"{i}_condition"] = b.condition or ""
-            metadata[f"{i}_condition_threshold"] = str(b.condition_threshold)
-            
-        save_file(tensors, path, metadata)
+
+        data = safetensors_save(tensors, metadata)
+        if isinstance(path, (str, bytes)):
+            with open(path, "wb") as f: f.write(data)
+        else:
+            path.write(data)
         
     @classmethod
     def load(cls, path:str):
@@ -35,14 +38,12 @@ class NPProfile:
         biases = []
         for i in range(len(tensors.keys())):
             condition_str = metadata.get(f"{i}_condition", "")
-            condition_threshold = float(metadata.get(f"{i}_condition_threshold", "0.3"))
             bias = FeatureBias(
                 tensors[str(i)],
                 float(metadata[f"{i}_bias"]),
                 int(metadata[f"{i}_layer"]),
                 metadata[f"{i}_name"],
                 condition=condition_str if condition_str else None,
-                condition_threshold=condition_threshold
             )
             biases.append(bias)
         return cls(biases)

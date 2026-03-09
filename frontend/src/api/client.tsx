@@ -1,14 +1,33 @@
 export class Model {
     public loaded:boolean = false
-    public name:string = ""
+    public name:string = "NONE"
     public numLayers:number = 0
     public neuronsPerLayer:number[] = []
+}
+
+export type Tensor = number[]
+
+export class FeatureBias {
+    public vector:Tensor = []
+    public bias:number = 0.0
+    public layer:number = 0
+    public name:string = ""
+    public condition:string = ""
+    public layer_diffs:number[][] = []
 }
 
 export enum Task {
     LoadingModel = "Loading Model",
     LoadingModelInfo = "Loading Model Info",
     Scanning = "Scanning"
+}
+
+export type SeparationQuality = {
+    quality:number
+    avg_pos:number
+    avg_neg:number
+    pos_sims:number[]
+    neg_sims:number[]
 }
 
 export type TaskHandle = {
@@ -21,21 +40,21 @@ export type ScanResult = {
     name:string
     highest_layer:number
     layer_diffs:number[][]
-    vector:number[]
+    vector:Tensor
 }
 
 export type ScanProgress = {
-    running: boolean
-    done: boolean
-    current_input: number
-    total_inputs: number
-    layer_diffs: number[][]
-    highest_layer: number
-    vector: number[]
-    name: string
+    running:boolean
+    done:boolean
+    current_input:number
+    total_inputs:number
+    layer_diffs:number[][]
+    highest_layer:number
+    vector:Tensor
+    name:string
 }
 
-export type ScanProgressCallback = (progress: ScanProgress) => void
+export type ScanProgressCallback = (progress:ScanProgress) => void
 
 export class Busy {
     public currentTasks:Map<number, Task> = new Map()
@@ -102,6 +121,8 @@ export class Client {
         const result = await fetch("http://localhost:8000/model_info")
         const data = await result.json()
         Client.model.loaded = data.loaded
+        if (!Client.model.loaded) return
+        Client.model.name = data.model_name
         Client.model.numLayers = data.num_layers
         Client.model.neuronsPerLayer = data.neurons_per_layer
     }
@@ -115,22 +136,17 @@ export class Client {
         return handle
     }
 
-    /**
-     * Starts a scan and polls /scan_progress, firing onProgress each tick.
-     * Resolves with the final ScanResult when done.
-     */
     public static async scan(
-        name: string,
-        posInputs: string[],
-        negInputs: string[],
-        bias: number = 0.0,
-        onProgress?: ScanProgressCallback,
-        pollInterval: number = 200
-    ): Promise<ScanResult> {
+        name:string,
+        posInputs:string[],
+        negInputs:string[],
+        bias:number = 0.0,
+        onProgress?:ScanProgressCallback,
+        pollInterval:number = 200
+    ):Promise<ScanResult> {
         if (!Client.model.loaded)
             throw new Error("Model not loaded")
 
-        // kick off the scan (returns immediately with {started: true})
         await fetch("http://localhost:8000/scan", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
@@ -142,7 +158,6 @@ export class Client {
             })
         })
 
-        // poll until done
         while (true) {
             await new Promise(r => setTimeout(r, pollInterval))
 
@@ -163,12 +178,12 @@ export class Client {
     }
 
     public static scanWithHandle(
-        name: string,
-        posInputs: string[],
-        negInputs: string[],
-        bias: number = 0.0,
-        onProgress?: ScanProgressCallback
-    ): { handle: TaskHandle; result: Promise<ScanResult> } {
+        name:string,
+        posInputs:string[],
+        negInputs:string[],
+        bias:number = 0.0,
+        onProgress?:ScanProgressCallback
+    ):{ handle:TaskHandle; result:Promise<ScanResult> } {
         const handle = Client.busy.addTask(Task.Scanning)
         const result = (async () => {
             try {
@@ -178,5 +193,74 @@ export class Client {
             }
         })()
         return { handle, result }
+    }
+
+    public static async saveProfile(biases:FeatureBias[]):Promise<void> {
+        const res = await fetch("http://localhost:8000/save_profile", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                biases: biases.map(b => ({
+                    vector: b.vector,
+                    bias: b.bias,
+                    layer: b.layer,
+                    name: b.name,
+                    condition: b.condition,
+                }))
+            })
+        })
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = "profile.npbp"
+        a.click()
+        URL.revokeObjectURL(url)
+    }
+
+    public static async separationQuality(
+        vector:Tensor,
+        layer:number,
+        posInputs:string[],
+        negInputs:string[],
+        skipTokens:string[] = []
+    ):Promise<SeparationQuality> {
+        const res = await fetch("http://localhost:8000/separation_quality", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                vector,
+                layer,
+                pos_inputs: posInputs,
+                neg_inputs: negInputs,
+                skip_tokens: skipTokens
+            })
+        })
+        return await res.json() as {
+            quality:number
+            avg_pos:number
+            avg_neg:number
+            pos_sims:number[]
+            neg_sims:number[]
+        }
+    }
+
+    public static async loadProfile(file:File):Promise<FeatureBias[]> {
+        const formData = new FormData()
+        formData.append("file", file)
+        const res = await fetch("http://localhost:8000/load_profile", {
+            method: "POST",
+            body: formData
+        })
+        const data = await res.json()
+        return data.biases.map((b:any) => {
+            const fb = new FeatureBias()
+            fb.name = b.name
+            fb.bias = b.bias
+            fb.layer = b.layer
+            fb.condition = b.condition
+            fb.vector = b.vector
+            return fb
+        })
     }
 }

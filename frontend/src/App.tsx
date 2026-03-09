@@ -1,9 +1,13 @@
 import NetworkVisualizer from "./netvis/components/NetworkVisualizer"
-import { Client, ScanResult } from "./api/client";
+import { Client, FeatureBias, ScanResult } from "./api/client";
 import { useState, useEffect } from 'react'
-import ScanWindow from "./ui/ScanWindow";
+import DifferentialScanWindow from "./ui/DifferentialScanWindow";
 import NPTopBar from "./ui/elements/NPTopBar";
 import NPButton from "./ui/elements/NPButton";
+import ModelLoaderWindow from "./ui/ModelLoaderWindow";
+import BiasManagerWindow from "./ui/BiasManagerWindow";
+import QualityTestWindow from "./ui/QualityTestWindow";
+import Project from "./Project";
 
 const EMPTY_SCAN: ScanResult = {
     name: "",
@@ -12,29 +16,41 @@ const EMPTY_SCAN: ScanResult = {
     vector: []
 }
 
+let project:Project = new Project()
+
 export async function InitApp(setStatus: (s: string) => void) {
-    setStatus("Loading model info...")
+    project.name = "New Project"
+    project.description = "Description goes here."
     await Client.getModelInfo()
-    if (!Client.model.loaded) {
-        setStatus("Loading model...")
-        await Client.loadModel("phi-2")
-        await Client.getModelInfo()
-    }
-    setStatus("")
 }
 
 function App() {
     const [numLayers, setNumLayers] = useState(0)
     const [nPerLayer, setNPerLayer] = useState([0])
-    const [scanWindowOpen, setScanWindowOpen] = useState(false)
-    const [status, setStatus] = useState("Loading...")
+    const [differentialScanWindowOpen, setDifferentialScanWindowOpen] = useState(false)
+    const [modelLoaderWindowOpen, setModelLoaderWindowOpen] = useState(false)
+    const [biasManagerWindowOpen, setBiasManagerWindowOpen] = useState(false)
+    const [qualityTestWindowOpen, setQualityTestWindowOpen] = useState(false)
+    const [status, setStatus] = useState("")
     const [scanRes, setScanRes] = useState<ScanResult>(EMPTY_SCAN)
+    const [modelName, setModelName] = useState("")
+    const [scaledActivations, setScaledActivations] = useState(true)
+    const [biases, setProjectBiases] = useState(project.biases)
+
+    const setBiases = (pBiases:FeatureBias[]) => {
+        setProjectBiases(pBiases)
+        project.biases = pBiases
+    }
+
+    const updateModelInfo = () => {
+        setNumLayers(Client.model.numLayers)
+        setNPerLayer(Client.model.neuronsPerLayer)
+        setModelName(Client.model.name)
+        project.model = Client.model.name
+    }
 
     useEffect(() => {
-        InitApp(setStatus).then(() => {
-            setNumLayers(Client.model.numLayers)
-            setNPerLayer(Client.model.neuronsPerLayer)
-        })
+        InitApp(setStatus).then(updateModelInfo)
     }, [])
 
     return (
@@ -44,14 +60,51 @@ function App() {
                 nPerLayer={nPerLayer}
                 nActivations={scanRes.layer_diffs}
                 highestLayer={scanRes.highest_layer}
+                rawMode={!scaledActivations}
             />
             <NPTopBar>
-                <NPButton onClick={() => setScanWindowOpen(true)}>Scan</NPButton>
+                <p>Current model loaded: {modelName}</p>
+                <NPButton onClick={() => setModelLoaderWindowOpen(true)}>Load Model</NPButton>
+                <NPButton
+                    onClick={() => setDifferentialScanWindowOpen(true)}
+                    disabled={!Client.model.loaded}
+                >
+                    Differential Scan
+                </NPButton>
+                <NPButton onClick={() => setScaledActivations(!scaledActivations)}>Scaled Activations [{scaledActivations ? "ON" : "OFF"}]</NPButton>
+                <NPButton onClick={() => setBiasManagerWindowOpen(true)}>Bias Manager</NPButton>
+                <NPButton
+                    onClick={() => setQualityTestWindowOpen(true)}
+                    disabled={!Client.model.loaded}
+                >
+                    Quality Test
+                </NPButton>
             </NPTopBar>
-            {scanWindowOpen && (
-                <ScanWindow
-                    onClose={() => setScanWindowOpen(false)}
+            {modelLoaderWindowOpen && (
+                <ModelLoaderWindow
+                    onClose={() => setModelLoaderWindowOpen(false)}
+                    onModelLoad={updateModelInfo}
+                />
+            )}
+            {differentialScanWindowOpen && (
+                <DifferentialScanWindow
+                    onClose={() => setDifferentialScanWindowOpen(false)}
                     onScanUpdate={setScanRes}
+                    biases={biases}
+                    onBiasesChange={setBiases}
+                />
+            )}
+            {biasManagerWindowOpen && (
+                <BiasManagerWindow
+                    onClose={() => setBiasManagerWindowOpen(false)}
+                    biases={biases}
+                    onChange={setBiases}
+                />
+            )}
+            {qualityTestWindowOpen && (
+                <QualityTestWindow
+                    onClose={() => setQualityTestWindowOpen(false)}
+                    biases={biases}
                 />
             )}
             {status && (

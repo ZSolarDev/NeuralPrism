@@ -15,11 +15,13 @@ function NetworkVisualizer({
     nPerLayer,
     nActivations,
     highestLayer,
+    rawMode = false,
 }: {
-    numLayers: number
-    nPerLayer: number[]
-    nActivations: number[][]
-    highestLayer: number
+    numLayers:number
+    nPerLayer:number[]
+    nActivations:number[][]
+    highestLayer:number
+    rawMode?:boolean
 }) {
     const appRef = useRef<ApplicationRef | null>(null)
     const containerRef = useRef<Container | null>(null)
@@ -51,14 +53,37 @@ function NetworkVisualizer({
         return { globalMax, layerMaxes }
     }, [nActivations])
 
-    const getActivation = (li: number, realIndex: number) => {
+    const getActivationProcessed = (li:number, realIndex:number) => {
         const layerActs = nActivations?.[li] ?? []
         const layerMax = layerMaxes[li] ?? 1e-6
-        const layerImportance = Math.pow(layerMax / globalMax, 2)
+        const layerImportance = Math.pow(layerMax / globalMax, 1.5)
         const raw = layerActs[realIndex] ?? 0
-        const localActivation = Math.pow(Math.abs(raw) / layerMax, 2)
+        const localActivation = Math.pow(Math.abs(raw) / layerMax, 1.5)
         return localActivation * layerImportance
     }
+
+    const getActivationRaw = (li:number, realIndex:number) => {
+        const layerActs = nActivations?.[li] ?? []
+        const raw = layerActs[realIndex] ?? 0
+        return Math.abs(raw) / globalMax
+    }
+
+    const getActivation = rawMode ? getActivationRaw : getActivationProcessed
+
+    useEffect(() => {
+        const trySetInitial = () => {
+            if (!containerRef.current) {
+                requestAnimationFrame(trySetInitial)
+                return
+            }
+            containerRef.current.scale.set(curScaleRef.current)
+            containerRef.current.position.set(
+                curOffsetRef.current.x + size.width / 2,
+                curOffsetRef.current.y + size.height / 2
+            )
+        }
+        trySetInitial()
+    }, [])
 
     useEffect(() => {
         const handleResize = () => {
@@ -74,14 +99,14 @@ function NetworkVisualizer({
     const neuronSpacing = 30
     const neuronRadius = 8
 
-    const layers: Layer[] = useMemo(() => {
+    const layers:Layer[] = useMemo(() => {
         const scaled = scaleNeuronsCount(nPerLayer, 1, 15)
         return scaled.map((count, li) => {
             const totalNeurons = nPerLayer[li]
             const totalHeight = (count - 1) * neuronSpacing
             const x = li * layerSpacing - (numLayers - 1) * layerSpacing / 2
 
-            let selectedIndices: number[]
+            let selectedIndices:number[]
             if (totalNeurons <= count) {
                 selectedIndices = Array.from({ length: totalNeurons }, (_, i) => i)
             } else {
@@ -108,15 +133,21 @@ function NetworkVisualizer({
 
     // rebuild full texture when layers change
     useEffect(() => {
-        const app = appRef.current?.getApplication?.()
-        if (!app) return
-        rebuildFullTexture(app, layers, highestLayer, fullTextureRef, fullSpriteRef, containerRef)
-        zoomedDirtyRef.current = true
-    }, [layers, highestLayer])
+        const tryBuild = () => {
+            const app = appRef.current?.getApplication?.()
+            if (!app || !app.renderer) {
+                requestAnimationFrame(tryBuild)
+                return
+            }
+            rebuildFullTexture(app, layers, nActivations, globalMax, layerMaxes, rawMode, fullTextureRef, fullSpriteRef, containerRef)
+            zoomedDirtyRef.current = true
+        }
+        tryBuild()
+    }, [layers, highestLayer, rawMode])
 
     // animate loop
     useEffect(() => {
-        let animFrame: number
+        let animFrame:number
         const { width, height } = size
 
         const animate = () => {
@@ -137,14 +168,14 @@ function NetworkVisualizer({
             }
 
             const enteringZoom = curScaleRef.current >= 1.5
-            const enteringHighZoom = curScaleRef.current >= 3           
+            const enteringHighZoom = curScaleRef.current >= 3
 
             if (enteringHighZoom && !isHighZoomedInRef.current) {
                 isHighZoomedInRef.current = true
                 zoomedDirtyRef.current = true
             } else if (!enteringHighZoom && isHighZoomedInRef.current) {
                 isHighZoomedInRef.current = false
-                zoomedDirtyRef.current = true  // rebuild at medium res when dropping back
+                zoomedDirtyRef.current = true
             }
 
             // fade between full and zoomed sprites
@@ -164,7 +195,7 @@ function NetworkVisualizer({
                 const curTop    = (-curOffsetRef.current.y - height / 2) / curScaleRef.current
                 const curRight  = (-curOffsetRef.current.x + width / 2) / curScaleRef.current
                 const curBottom = (-curOffsetRef.current.y + height / 2) / curScaleRef.current
-                        
+
                 if (curLeft < b.left || curTop < b.top || curRight > b.right || curBottom > b.bottom) {
                     zoomedDirtyRef.current = true
                 }
@@ -176,7 +207,7 @@ function NetworkVisualizer({
                 const app = appRef.current?.getApplication?.()
                 if (app) {
                     const bounds = rebuildZoomedTexture(
-                        app, layers, highestLayer,
+                        app, layers, nActivations, globalMax, layerMaxes, rawMode,
                         curScaleRef.current, curOffsetRef.current,
                         width, height,
                         zoomedTextureRef, zoomedSpriteRef, containerRef
@@ -220,9 +251,9 @@ function NetworkVisualizer({
         }
         animFrame = requestAnimationFrame(animate)
         return () => cancelAnimationFrame(animFrame)
-    }, [layers, nActivations, size])
+    }, [layers, nActivations, size, rawMode])
 
-    const drawNeurons = useCallback((g: any) => {
+    const drawNeurons = useCallback((g:any) => {
         g.clear()
         layers.forEach((layer, li) =>
             layer.forEach((neuron) => {
@@ -236,7 +267,7 @@ function NetworkVisualizer({
                 g.stroke()
             })
         )
-    }, [layers, nActivations])
+    }, [layers, nActivations, rawMode])
 
     const { width, height } = size
 
@@ -253,7 +284,7 @@ function NetworkVisualizer({
                 y={height / 2}
                 ref={containerRef}
             >
-                <pixiGraphics draw={drawNeurons} />
+                <pixiGraphics key={layers.flat().length} draw={drawNeurons} />
                 <pixiGraphics ref={pulseGfxRef} draw={() => {}} />
             </pixiContainer>
         </Application>

@@ -2,12 +2,15 @@ import { RenderTexture, Sprite, Graphics, Matrix, Container } from 'pixi.js'
 import { lerp, Layer } from '../utils/utils'
 
 export function rebuildFullTexture(
-    app: any,
-    layers: Layer[],
-    highestLayer: number,
-    textureRef: React.MutableRefObject<RenderTexture | null>,
-    spriteRef: React.MutableRefObject<Sprite | null>,
-    containerRef: React.MutableRefObject<Container | null>,
+    app:any,
+    layers:Layer[],
+    nActivations:number[][],
+    globalMax:number,
+    layerMaxes:number[],
+    rawMode:boolean,
+    textureRef:React.MutableRefObject<RenderTexture | null>,
+    spriteRef:React.MutableRefObject<Sprite | null>,
+    containerRef:React.MutableRefObject<Container | null>,
 ) {
     if (!app || layers.flat().length === 0) return
 
@@ -30,22 +33,49 @@ export function rebuildFullTexture(
     const texH = Math.floor(rawH * texScale)
     const effRes = resolution * texScale
 
+    const neuronActs = layers.map((layer, li) => {
+        const acts = nActivations?.[li]
+        const layerMax = layerMaxes[li] ?? 1e-6
+        return layer.map(n => {
+            if (!acts?.length) return -1
+            const raw = Math.abs(acts[n.realIndex] ?? 0)
+            if (rawMode) {
+                return raw / globalMax
+            } else {
+                const layerImportance = Math.pow(layerMax / globalMax, 1.5)
+                const localActivation = Math.pow(raw / layerMax, 1.5)
+                return localActivation * layerImportance
+            }
+        })
+    })
+
     textureRef.current?.destroy(true)
     textureRef.current = RenderTexture.create({ width: texW, height: texH })
 
     const g = new Graphics()
-    layers.slice(0, -1).forEach((layer, i) => {
-        const t = highestLayer === 0 ? 1 : Math.min(i, highestLayer) / highestLayer
-        const alpha = lerp(0.03, 0.2, t)
-        g.setStrokeStyle({ width: 1, color: 0x00ff41, alpha })
-        layer.forEach(n =>
-            layers[i + 1].forEach(n2 => {
-                const cpX = (n.x + n2.x) / 2
-                g.moveTo(n.x, n.y)
-                g.bezierCurveTo(cpX, n.y, cpX, n2.y, n2.x, n2.y)
+    layers.slice(0, -1).forEach((layer, li) => {
+        layer.forEach((n, ni) => {
+            layers[li + 1].forEach((n2, ni2) => {
+                const a1 = neuronActs[li][ni]
+                const a2 = neuronActs[li + 1][ni2]
+                const noData = a1 === -1 || a2 === -1
+                
+                const segments = 8
+                for (let s = 0; s < segments; s++) {
+                    const t0 = s / segments
+                    const t1 = (s + 1) / segments
+                    const alpha = noData ? 0.1 : lerp(0.03, 0.6, Math.pow(lerp(a1, a2, (t0 + t1) / 2), 2))
+                    const x0 = lerp(n.x, n2.x, t0)
+                    const y0 = lerp(n.y, n2.y, t0)
+                    const x1 = lerp(n.x, n2.x, t1)
+                    const y1 = lerp(n.y, n2.y, t1)
+                    g.setStrokeStyle({ width: 1, color: 0x00ff41, alpha })
+                    g.moveTo(x0, y0)
+                    g.lineTo(x1, y1)
+                    g.stroke()
+                }
             })
-        )
-        g.stroke()
+        })
     })
 
     const matrix = new Matrix()

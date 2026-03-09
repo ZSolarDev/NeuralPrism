@@ -1,5 +1,6 @@
 from torch import Tensor
 import torch
+import torch.nn.functional as F
 from transformer_lens import HookedTransformer, ActivationCache
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -16,14 +17,12 @@ class FeatureBias:
         layer (int): The layer
         name (str): The name
         condition (str | None): Boolean expression over bias indices, e.g. "(0 AND 1) OR 2". None means unconditional.
-        condition_threshold (float): Cosine similarity threshold for condition checks. Defaults to 0.3.
     """
     vector:Tensor
     bias:float
     layer:int
     name:str
     condition:str | None = None
-    condition_threshold:float = 0.3
 
 @dataclass
 class NPScanResult:
@@ -38,6 +37,24 @@ class NPScanResult:
     layerDiffs:list[list[Tensor]]
     highestLayer:int
     highestFeature:Tensor
+
+@dataclass
+class SeparationQuality:
+    """
+    Result of NPScanner.separation_quality().
+    
+    Attributes:
+        quality (float): 0-1 score of how cleanly the vector separates pos/neg inputs
+        avg_pos (float): Average cosine similarity of positive inputs to the vector
+        avg_neg (float): Average cosine similarity of negative inputs to the vector
+        pos_sims (list[float]): Per-input cosine similarities for positives
+        neg_sims (list[float]): Per-input cosine similarities for negatives
+    """
+    quality:float
+    avg_pos:float
+    avg_neg:float
+    pos_sims:list[float]
+    neg_sims:list[float]
 
 # (current_input, total_inputs, layer_diffs_so_far, highest_layer, highest_vector)
 ProgressCallback = Callable[[int, int, list[list[float]], int, list[float]], None]
@@ -186,6 +203,86 @@ class NPScanner:
                 highest_layer = i
 
         return NPScanResult(layer_diffs_tensors, highest_layer, highest_feature)
+
+    def separation_quality(self, vector:Tensor, layer:int, pos_inputs:list[str], neg_inputs:list[str], skip_tokens:list[str] = []) -> SeparationQuality:
+        """
+        Measures how cleanly a vector separates positive from negative inputs
+        by computing cosine similarity of each input's residual stream against the vector.
+        
+        Args:
+            vector (Tensor): The feature vector to test
+            layer (int): The layer to check residual stream at
+            pos_inputs (list[str]): Positive inputs (should score high)
+            neg_inputs (list[str]): Negative inputs (should score low)
+            skip_tokens (list[str]): Tokens to skip when averaging
+            
+        Returns:
+            SeparationQuality
+        """
+        vector = vector.to(self.model.cfg.device)
+        pos_sims = []
+        neg_sims = []
+
+        for inputs, sims in [(pos_inputs, pos_sims), (neg_inputs, neg_sims)]:
+            for inp in inputs:
+                acts = self._run_input(inp, skip_tokens)
+                resid = acts[layer]
+                sim = F.cosine_similarity(resid.unsqueeze(0), vector.unsqueeze(0)).item()
+                sims.append(sim)
+
+        avg_pos = sum(pos_sims) / len(pos_sims) if pos_sims else 0.0
+        avg_neg = sum(neg_sims) / len(neg_sims) if neg_sims else 0.0
+
+        # spread of -1..1 mapped to 0..1
+        spread = avg_pos - avg_neg
+        quality = max(0.0, min(1.0, (spread + 1) / 2))
+
+        return SeparationQuality(quality, avg_pos, avg_neg, pos_sims, neg_sims)
+
+    def scan_tokens(self, inputs: list[str], on_progress: Optional[ProgressCallback] = None) -> list[list[dict]]:
+        """
+        Scans each token in each input and returns per-token per-layer activations.
+        
+        Args:
+            inputs (list[str]): List of inputs to scan
+            on_progress (ProgressCallback | None): Optional callback fired after each input
+            
+        Returns:
+            list[list[dict]]: List of inputs, each containing a list of tokens with activation data
+        """
+        results = []
+        for i, inp in enumerate(inputs):
+            tokens = self.model.to_tokens(inp)
+            token_ids = tokens[0]
+            token_strs = [self.model.to_string([t]) for t in token_ids]
+    
+            layer_acts: dict[int, Tensor] = {}
+    
+            def make_hook(layer_idx):
+                def hook(value, hook):
+                    layer_acts[layer_idx] = value[0].detach()  # [seq, d_model]
+                    return value
+                return hook
+    
+            hooks = [(lid, make_hook(i)) for i, lid in enumerate(self.layerIDs)]
+            self.model.run_with_hooks(tokens, fwd_hooks=hooks)
+    
+            token_data = []
+            for tok_idx, tok_str in enumerate(token_strs):
+                layers = []
+                for layer_idx in range(len(self.layerIDs)):
+                    acts = layer_acts[layer_idx][tok_idx]  # [d_model]
+                    layers.append([v.item() for v in acts])
+                token_data.append({
+                    "token": tok_str,
+                    "data": layers
+                })
+            results.append(token_data)
+    
+            if on_progress is not None:
+                on_progress(i + 1, len(inputs), results, 0, [])
+    
+        return results
 
     def to_feature_bias(self, scanRes:NPScanResult, bias:float = 1.0) -> FeatureBias:
         """

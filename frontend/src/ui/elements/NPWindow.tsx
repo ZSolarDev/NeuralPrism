@@ -8,12 +8,12 @@ type Bounds = { x:number, y:number, w:number, h:number }
 
 function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fitToBounds }: {
     name:string
-    children: React.ReactNode
-    onClose?: () => void
-    defaultPos?: { x:number, y:number }
-    defaultSize?: { width:number, height:number }
-    bounds?: Bounds | (() => Bounds)
-    fitToBounds?: boolean
+    children:React.ReactNode
+    onClose?:() => void
+    defaultPos?:{ x:number, y:number }
+    defaultSize?:{ width:number, height:number }
+    bounds?:Bounds | (() => Bounds)
+    fitToBounds?:boolean
 }) {
     const [pos, setPos] = useState(defaultPos ?? { x: 100, y: 100 })
     const sizeRef = useRef(defaultSize ?? { width: 300, height: 200 })
@@ -21,7 +21,7 @@ function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fi
     const boundsRef = useRef(bounds)
     const fitToBoundsRef = useRef(fitToBounds)
 
-    const updateSize = (newSize: { width:number, height:number }) => {
+    const updateSize = (newSize:{ width:number, height:number }) => {
         sizeRef.current = newSize
         setSize(newSize)
     }
@@ -103,11 +103,6 @@ function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fi
     }
 
     const applyFitAndClamp = () => {
-        console.log('bounds:', getBounds())
-    console.log('size:', sizeRef.current)
-    console.log('minX:', minX(), 'maxX:', maxX(), 'minY:', minY(), 'maxY:', maxY())
-    console.log('fitToBounds:', fitToBoundsRef.current)
-    console.log('typeof bounds:', typeof boundsRef.current)
         if (fitToBoundsRef.current) {
             const w = maxW()
             const h = maxH()

@@ -1,17 +1,17 @@
 import { useRef, useEffect } from 'react'
 
-export function useCanvasControls(getCanvas: () => HTMLCanvasElement | null) {
+export function useCanvasControls(getCanvas:() => HTMLCanvasElement | null) {
     const targetOffset = useRef({ x: 0, y: 0 })
-    const targetScale = useRef(1)
+    const targetScale = useRef(0.5)
     const isDragging = useRef(false)
     const lastPointer = useRef({ x: 0, y: 0 })
     const curScaleRef = useRef(1)
     const curOffsetRef = useRef({ x: 0, y: 0 })
 
     useEffect(() => {
-        let canvas: HTMLCanvasElement | null = null
+        let canvas:HTMLCanvasElement | null = null
 
-        const onWheel = (e: WheelEvent) => {
+        const onWheel = (e:WheelEvent) => {
             e.preventDefault()
             if (!canvas) return
             const rect = canvas.getBoundingClientRect()
@@ -27,7 +27,7 @@ export function useCanvasControls(getCanvas: () => HTMLCanvasElement | null) {
             }
         }
 
-        const onPointerDown = (e: PointerEvent) => {
+        const onPointerDown = (e:PointerEvent) => {
             if (e.button !== 2) return
             e.preventDefault()
             isDragging.current = true
@@ -36,7 +36,7 @@ export function useCanvasControls(getCanvas: () => HTMLCanvasElement | null) {
             targetScale.current = curScaleRef.current
         }
 
-        const onPointerMove = (e: PointerEvent) => {
+        const onPointerMove = (e:PointerEvent) => {
             if (!isDragging.current) return
             const dx = e.clientX - lastPointer.current.x
             const dy = e.clientY - lastPointer.current.y
@@ -47,7 +47,7 @@ export function useCanvasControls(getCanvas: () => HTMLCanvasElement | null) {
             }
         }
 
-        const onPointerUp = (e: PointerEvent) => {
+        const onPointerUp = (e:PointerEvent) => {
             if (e.button !== 2) return
             isDragging.current = false
         }
@@ -55,7 +55,7 @@ export function useCanvasControls(getCanvas: () => HTMLCanvasElement | null) {
         const tryAttach = () => {
             canvas = getCanvas()
             if (canvas) {
-                canvas.addEventListener('wheel', onWheel, { passive: false })
+                canvas.addEventListener('wheel', onWheel, { passive:false })
                 canvas.addEventListener('contextmenu', e => e.preventDefault())
                 canvas.addEventListener('pointerdown', onPointerDown)
                 canvas.addEventListener('pointermove', onPointerMove)

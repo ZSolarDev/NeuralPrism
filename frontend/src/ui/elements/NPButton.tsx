@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-function NPButton({ children, onClick, disabled }: { children: React.ReactNode, onClick?: () => void, disabled?: boolean }) {
+function NPButton({ children, onClick, disabled, style }: { children:React.ReactNode, onClick?:() => void, disabled?:boolean, style?:React.CSSProperties }) {
     const [hovered, setHovered] = useState(false)
     const [pressed, setPressed] = useState(false)
 
@@ -23,7 +23,8 @@ function NPButton({ children, onClick, disabled }: { children: React.ReactNode, 
                 borderRadius: "4px",
                 transform: pressed && !disabled ? "scale(0.95)" : "scale(1)",
                 transition: "transform 0.1s ease, background 0.15s ease, color 0.15s ease, border 0.15s ease",
-                height: "31px"
+                minHeight: "31px",
+                ...style
             }}
         >
             {children}

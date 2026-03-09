@@ -12,21 +12,26 @@ class NPSteerer:
         self.curHandles = []
         self.model = None
     
-    def evaluate_condition(self, expr:str, biases:list[FeatureBias], residual:Tensor, threshold:float) -> bool:
-        # replace each index with True/False based on cosine similarity
-        def check(idx:int) -> bool:
+    def evaluate_condition(self, expr:str, biases:list[FeatureBias], residual:Tensor) -> bool:
+        cSim = 0
+        def check(idx:int, threshold:float) -> bool:
+            nonlocal cSim
             vec = biases[idx].vector
             resid_mean = residual[0].mean(dim=0)
             sim = F.cosine_similarity(resid_mean.unsqueeze(0), vec.unsqueeze(0))
-            return sim.item() > threshold
+            cSim = sim.item()
+            return cSim > threshold
 
-        # substitute all numbers with bool results
         def replace_index(match):
-            return str(check(int(match.group())))
-
-        evaluated = re.sub(r'\d+', replace_index, expr)
+            idx = int(match.group(1))
+            threshold = float(match.group(2)) if match.group(2) is not None else 0.3
+            return str(check(idx, threshold))
+        
+        evaluated = re.sub(r'(\d+)(?:\[(-?[\d.]+)\])?', replace_index, expr)
         evaluated = evaluated.replace("AND", "and").replace("OR", "or").replace("NOT", "not")
-        return eval(evaluated)
+        ret = eval(evaluated)
+        print(ret, biases[1].name, cSim)
+        return ret
     
     
     def hookOnModel(self, model:HookedTransformer, unhook:bool = True) -> "NPSteerer":
@@ -45,6 +50,7 @@ class NPSteerer:
         self.model = model
         biasesByLayer = {}
         for bias in self.biases:
+            bias.vector = bias.vector.to(model.cfg.device)
             if bias.layer not in biasesByLayer:
                 biasesByLayer[bias.layer] = []
             biasesByLayer[bias.layer].append(bias)
@@ -55,7 +61,7 @@ class NPSteerer:
                 def hook(module, input, output):
                     resid = input[0]
                     for bias in fBiases:
-                        if bias.condition is None or self.evaluate_condition(bias.condition, self.biases, resid, bias.condition_threshold):
+                        if bias.condition is None or self.evaluate_condition(bias.condition, self.biases, resid):
                             output += bias.vector * bias.bias
                     return output
                 return hook

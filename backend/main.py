@@ -277,3 +277,45 @@ def _scan_sync(req:ScanRequest):
         "vector": final_vec,
         "name": req.name,
     }
+    
+class LogitLensRequest(BaseModel):
+    token_index:int
+    input_text:str
+    top_k:int = 3
+
+@app.post("/logit_lens")
+def logit_lens(req:LogitLensRequest):
+    if model is None:
+        return {"error": "Model not loaded"}
+
+    tokens = model.to_tokens(req.input_text)
+    layerIDs = [f"blocks.{i}.hook_resid_pre" for i in range(model.cfg.n_layers)]
+
+    layer_acts:dict[int, torch.Tensor] = {}
+
+    def make_hook(layer_idx):
+        def hook(value, hook):
+            layer_acts[layer_idx] = value[0, req.token_index].detach().float()
+            return value
+        return hook
+
+    hooks = [(lid, make_hook(i)) for i, lid in enumerate(layerIDs)]
+    model.run_with_hooks(tokens, fwd_hooks=hooks)
+
+    results = []
+    for i in range(model.cfg.n_layers):
+        resid = layer_acts[i].unsqueeze(0)
+        resid_normed = model.ln_final(resid)
+        logits = model.unembed(resid_normed)[0]
+        probs = torch.softmax(logits, dim=-1)
+        topk = torch.topk(probs, req.top_k)
+        top = [
+            {
+                "token": model.to_string([topk.indices[j].item()]),
+                "prob": topk.values[j].item()
+            }
+            for j in range(req.top_k)
+        ]
+        results.append({"layer": i, "top": top})
+
+    return {"layers": results}

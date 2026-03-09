@@ -60,11 +60,11 @@ prompts = [
 for label, prompt in prompts:
     tokens = model.to_tokens(prompt)
 
-    raw_output = model.generate(tokens, max_new_tokens=40)
+    raw_output = model.generate(tokens, max_new_tokens=30)
     raw_continuation = model.to_string(raw_output[0][tokens.shape[1]:]).replace("<|endoftext|>", "")
 
     steerer.hookOnModel(model)
-    steered_output = model.generate(tokens, max_new_tokens=40)
+    steered_output = model.generate(tokens, max_new_tokens=30)
     steered_continuation = model.to_string(steered_output[0][tokens.shape[1]:]).replace("<|endoftext|>", "")
     steerer.unhookFromModel()
 

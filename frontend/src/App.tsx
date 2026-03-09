@@ -7,6 +7,7 @@ import NPButton from "./ui/elements/NPButton";
 import ModelLoaderWindow from "./ui/ModelLoaderWindow";
 import BiasManagerWindow from "./ui/BiasManagerWindow";
 import QualityTestWindow from "./ui/QualityTestWindow";
+import TokenActivationWindow from "./ui/TokenActivationWindow";
 import Project from "./Project";
 
 const EMPTY_SCAN: ScanResult = {
@@ -31,6 +32,7 @@ function App() {
     const [modelLoaderWindowOpen, setModelLoaderWindowOpen] = useState(false)
     const [biasManagerWindowOpen, setBiasManagerWindowOpen] = useState(false)
     const [qualityTestWindowOpen, setQualityTestWindowOpen] = useState(false)
+    const [tokenActivationWindowOpen, setTokenActivationWindowOpen] = useState(false)
     const [status, setStatus] = useState("")
     const [scanRes, setScanRes] = useState<ScanResult>(EMPTY_SCAN)
     const [modelName, setModelName] = useState("")
@@ -47,6 +49,15 @@ function App() {
         setNPerLayer(Client.model.neuronsPerLayer)
         setModelName(Client.model.name)
         project.model = Client.model.name
+    }
+
+    const handleTokenActivationsUpdate = (activations:number[][], highestLayer:number) => {
+        setScanRes({
+            name: "",
+            highest_layer: highestLayer,
+            layer_diffs: activations,
+            vector: activations[highestLayer] ?? []
+        })
     }
 
     useEffect(() => {
@@ -79,6 +90,12 @@ function App() {
                 >
                     Quality Test
                 </NPButton>
+                <NPButton
+                    onClick={() => setTokenActivationWindowOpen(true)}
+                    disabled={!Client.model.loaded}
+                >
+                    Token Activations
+                </NPButton>
             </NPTopBar>
             {modelLoaderWindowOpen && (
                 <ModelLoaderWindow
@@ -105,6 +122,14 @@ function App() {
                 <QualityTestWindow
                     onClose={() => setQualityTestWindowOpen(false)}
                     biases={biases}
+                />
+            )}
+            {tokenActivationWindowOpen && (
+                <TokenActivationWindow
+                    onClose={() => setTokenActivationWindowOpen(false)}
+                    biases={biases}
+                    onBiasesChange={setBiases}
+                    onActivationsUpdate={handleTokenActivationsUpdate}
                 />
             )}
             {status && (

@@ -13,14 +13,11 @@ class NPSteerer:
         self.model = None
     
     def evaluate_condition(self, expr:str, biases:list[FeatureBias], residual:Tensor) -> bool:
-        cSim = 0
         def check(idx:int, threshold:float) -> bool:
-            nonlocal cSim
             vec = biases[idx].vector
             resid_mean = residual[0].mean(dim=0)
             sim = F.cosine_similarity(resid_mean.unsqueeze(0), vec.unsqueeze(0))
-            cSim = sim.item()
-            return cSim > threshold
+            return sim.item() > threshold
 
         def replace_index(match):
             idx = int(match.group(1))
@@ -29,9 +26,7 @@ class NPSteerer:
         
         evaluated = re.sub(r'(\d+)(?:\[(-?[\d.]+)\])?', replace_index, expr)
         evaluated = evaluated.replace("AND", "and").replace("OR", "or").replace("NOT", "not")
-        ret = eval(evaluated)
-        print(ret, biases[1].name, cSim)
-        return ret
+        return eval(evaluated)
     
     
     def hookOnModel(self, model:HookedTransformer, unhook:bool = True) -> "NPSteerer":
@@ -62,7 +57,7 @@ class NPSteerer:
                     resid = input[0]
                     for bias in fBiases:
                         if bias.condition is None or self.evaluate_condition(bias.condition, self.biases, resid):
-                            output += bias.vector * bias.bias
+                            output += bias.vector * 0.5
                     return output
                 return hook
             self.curHandles.append(

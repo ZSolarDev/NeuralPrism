@@ -30,6 +30,16 @@ export type SeparationQuality = {
     neg_sims:number[]
 }
 
+export type TokenActivationResult = {
+    token:string
+    data:number[][]
+}
+
+export type LayerPrediction = {
+    layer:number
+    top:{ token:string, prob:number }[]
+}
+
 export type TaskHandle = {
     id:number
     type:Task
@@ -160,12 +170,9 @@ export class Client {
 
         while (true) {
             await new Promise(r => setTimeout(r, pollInterval))
-
             const res = await fetch("http://localhost:8000/scan_progress")
             const progress: ScanProgress = await res.json()
-
             onProgress?.(progress)
-
             if (progress.done) {
                 return {
                     name: progress.name,
@@ -236,13 +243,7 @@ export class Client {
                 skip_tokens: skipTokens
             })
         })
-        return await res.json() as {
-            quality:number
-            avg_pos:number
-            avg_neg:number
-            pos_sims:number[]
-            neg_sims:number[]
-        }
+        return await res.json() as SeparationQuality
     }
 
     public static async loadProfile(file:File):Promise<FeatureBias[]> {
@@ -262,5 +263,41 @@ export class Client {
             fb.vector = b.vector
             return fb
         })
+    }
+
+    public static async tokenActivations(
+        inputs:string[],
+        onProgress?:(current:number, total:number) => void,
+        pollInterval:number = 200
+    ):Promise<TokenActivationResult[][]> {
+        await fetch("http://localhost:8000/token_activations", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ inputs })
+        })
+        while (true) {
+            await new Promise(r => setTimeout(r, pollInterval))
+            const res = await fetch("http://localhost:8000/token_activations_progress")
+            const data = await res.json()
+            onProgress?.(data.current_input, data.total_inputs)
+            if (data.done) return data.results as TokenActivationResult[][]
+        }
+    }
+
+    public static async logitLens(
+        tokenIndex:number,
+        inputText:string,
+        topK:number = 3
+    ):Promise<{ layers:LayerPrediction[] }> {
+        const res = await fetch("http://localhost:8000/logit_lens", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                token_index: tokenIndex,
+                input_text: inputText,
+                top_k: topK
+            })
+        })
+        return await res.json()
     }
 }

@@ -208,7 +208,7 @@ function NodeList({ nodes, onChange, biases, selfIndex, depth }: {
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             {nodes.length === 0 && depth === 0 && (
-                <span style={{ color: "#555", fontSize: "0.75rem" }}>No condition — always applies</span>
+                <span style={{ color: "#555", fontSize: "0.75rem" }}>No condition: always applies</span>
             )}
             {nodes.map((node, i) => (
                 <div

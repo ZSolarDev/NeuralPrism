@@ -1,10 +1,18 @@
 import { useState, useRef, useEffect } from "react"
+import { topBarHeightRef } from "./NPTopBar"
 
 const clamp = (val:number, min:number, max:number) => Math.max(min, Math.min(max, val))
 
 const BORDER = 6
 type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
 type Bounds = { x:number, y:number, w:number, h:number }
+
+const defaultBounds = (): Bounds => ({
+    x: 0,
+    y: topBarHeightRef.current,
+    w: window.innerWidth,
+    h: window.innerHeight - topBarHeightRef.current,
+})
 
 function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fitToBounds }: {
     name:string
@@ -15,7 +23,7 @@ function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fi
     bounds?:Bounds | (() => Bounds)
     fitToBounds?:boolean
 }) {
-    const [pos, setPos] = useState(defaultPos ?? { x: 100, y: 100 })
+    const [pos, setPos] = useState(defaultPos ?? { x: 100, y: topBarHeightRef.current + 10 })
     const sizeRef = useRef(defaultSize ?? { width: 300, height: 200 })
     const [size, setSize] = useState(defaultSize ?? { width: 300, height: 200 })
     const boundsRef = useRef(bounds)
@@ -26,21 +34,17 @@ function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fi
         setSize(newSize)
     }
 
-    const getBounds = (): Bounds | undefined =>
-        typeof boundsRef.current === 'function' ? boundsRef.current() : boundsRef.current
+    const getBounds = (): Bounds =>
+        typeof boundsRef.current === 'function'
+            ? boundsRef.current()
+            : boundsRef.current ?? defaultBounds()
 
-    const maxW = () => getBounds()?.w ?? window.innerWidth
-    const maxH = () => getBounds()?.h ?? window.innerHeight
-    const minX = () => getBounds()?.x ?? 0
-    const minY = () => getBounds()?.y ?? 0
-    const maxX = () => {
-        const b = getBounds()
-        return (b ? b.x + b.w : window.innerWidth) - sizeRef.current.width
-    }
-    const maxY = () => {
-        const b = getBounds()
-        return (b ? b.y + b.h : window.innerHeight) - sizeRef.current.height
-    }
+    const maxW = () => getBounds().w
+    const maxH = () => getBounds().h
+    const minX = () => getBounds().x
+    const minY = () => getBounds().y
+    const maxX = () => { const b = getBounds(); return b.x + b.w - sizeRef.current.width }
+    const maxY = () => { const b = getBounds(); return b.y + b.h - sizeRef.current.height }
 
     const dragging = useRef(false)
     const dragOffset = useRef({ x: 0, y: 0 })
@@ -106,12 +110,10 @@ function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fi
         if (fitToBoundsRef.current) {
             const w = maxW()
             const h = maxH()
-            if (sizeRef.current.width > w || sizeRef.current.height > h) {
-                updateSize({
-                    width: Math.min(sizeRef.current.width, w),
-                    height: Math.min(sizeRef.current.height, h),
-                })
-            }
+            const newW = Math.min(sizeRef.current.width, w)
+            const newH = Math.min(sizeRef.current.height, h)
+            if (newW !== sizeRef.current.width || newH !== sizeRef.current.height)
+                updateSize({ width: newW, height: newH })
         }
         setPos(p => ({ x: clamp(p.x, minX(), maxX()), y: clamp(p.y, minY(), maxY()) }))
     }
@@ -119,7 +121,11 @@ function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fi
     useEffect(() => {
         applyFitAndClamp()
         window.addEventListener('resize', applyFitAndClamp)
-        return () => window.removeEventListener('resize', applyFitAndClamp)
+        window.addEventListener('topbarresize', applyFitAndClamp)
+        return () => {
+            window.removeEventListener('resize', applyFitAndClamp)
+            window.removeEventListener('topbarresize', applyFitAndClamp)
+        }
     }, [])
 
     const edge = (dir:ResizeDir, style:React.CSSProperties) => (
@@ -143,7 +149,6 @@ function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fi
             overflow: "hidden",
             boxSizing: "border-box",
         }}>
-            {/* title bar */}
             <div
                 onMouseDown={onTitleMouseDown}
                 style={{
@@ -163,12 +168,10 @@ function NPWindow({ name, children, onClose, defaultPos, defaultSize, bounds, fi
                 >✕</span>
             </div>
 
-            {/* content */}
             <div style={{ padding: "12px", width: "100%", height: "calc(100% - 33px)", boxSizing: "border-box", overflow: "auto" }}>
                 {children}
             </div>
 
-            {/* edges */}
             {edge('n',  { top: 0, left: BORDER, right: BORDER, height: BORDER, cursor: 'n-resize' })}
             {edge('s',  { bottom: 0, left: BORDER, right: BORDER, height: BORDER, cursor: 's-resize' })}
             {edge('w',  { left: 0, top: BORDER, bottom: BORDER, width: BORDER, cursor: 'w-resize' })}

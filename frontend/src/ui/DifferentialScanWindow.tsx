@@ -38,7 +38,7 @@ const [negative, setNegative] = useState([
 
         let lastResult:ScanResult | null = null
 
-        const { result } = Client.scanWithHandle(
+        await Client.scan(
             name,
             positive,
             negative,
@@ -54,8 +54,6 @@ const [negative, setNegative] = useState([
                 setProgress({ current: p.current_input, total: p.total_inputs })
             }
         )
-
-        await result
 
         if (lastResult !== null) {
             const r = lastResult as ScanResult
@@ -85,7 +83,6 @@ const [negative, setNegative] = useState([
             name="Scan"
             onClose={onClose}
             defaultSize={{ width: 300, height: 540 }}
-            bounds={() => ({ x: 0, y: 35, w: window.innerWidth, h: window.innerHeight - 35 })}
             fitToBounds={true}
         >
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>

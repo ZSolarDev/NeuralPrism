@@ -22,8 +22,8 @@ export function rebuildZoomedTexture(
         ? Math.min(8, (window.devicePixelRatio || 1) * 4)
         : Math.min(4, (window.devicePixelRatio || 1) * 2)
 
-    const paddedW = screenW * 1.5
-    const paddedH = screenH * 1.5
+    const paddedW = screenW * 2
+    const paddedH = screenH * 2
 
     const texW = Math.floor(paddedW * resolution)
     const texH = Math.floor(paddedH * resolution)
@@ -61,7 +61,7 @@ export function rebuildZoomedTexture(
                 const a2 = neuronActs[li + 1][ni2]
                 const noData = a1 === -1 || a2 === -1
 
-                const segments = 8
+                const segments = 32
                 for (let s = 0; s < segments; s++) {
                     const t0 = s / segments
                     const t1 = (s + 1) / segments

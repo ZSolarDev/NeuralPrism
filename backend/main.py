@@ -6,6 +6,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from npprofile import NPProfile
 from npscanner import FeatureBias as NPFeatureBias, NPScanner
+from npsteerer import NPSteerer
 import torch
 import io
 import logging
@@ -42,10 +43,10 @@ scan_progress = {
 
 
 class LoadModelRequest(BaseModel):
-    model_name: str
+    model_name:str
 
 @app.post("/load_model")
-async def load_model(req: LoadModelRequest):
+async def load_model(req:LoadModelRequest):
     global curModelName
     curModelName = req.model_name
     global model
@@ -71,8 +72,7 @@ def model_info():
 token_scan_state = {
     "running": False,
     "done": False,
-    "current_input": 0,
-    "total_inputs": 0,
+    "total_tokens": 0,
     "results": [],
 }
 
@@ -86,18 +86,19 @@ async def token_activations(req:TokenActivationRequest):
     if token_scan_state["running"]:
         return {"error": "Token scan already in progress"}
 
+    total_tokens = sum(model.to_tokens(inp).shape[1] for inp in req.inputs)
+
     with scan_lock:
         token_scan_state.update({
             "running": True,
             "done": False,
-            "current_input": 0,
-            "total_inputs": len(req.inputs),
+            "total_tokens": total_tokens,
             "results": [],
         })
 
     loop = asyncio.get_event_loop()
     loop.run_in_executor(executor, _token_activations_sync, req)
-    return {"started": True}
+    return {"started": True, "total_tokens": total_tokens}
 
 @app.get("/token_activations_progress")
 def token_activations_progress():
@@ -105,29 +106,45 @@ def token_activations_progress():
         return {
             "running": token_scan_state["running"],
             "done": token_scan_state["done"],
-            "current_input": token_scan_state["current_input"],
-            "total_inputs": token_scan_state["total_inputs"],
+            "total_tokens": token_scan_state["total_tokens"],
             "results": token_scan_state["results"],
         }
 
 def _token_activations_sync(req:TokenActivationRequest):
     layerIDs = [f"blocks.{i}.hook_resid_pre" for i in range(model.cfg.n_layers)]
-    scanner = NPScanner(model=model, layerIDs=layerIDs)
+    all_results = []
 
-    def on_progress(current, total, results, _, __):
-        with scan_lock:
-            token_scan_state.update({
-                "current_input": current,
-                "results": results,
-            })
+    for inp in req.inputs:
+        tokens = model.to_tokens(inp)
+        token_ids = tokens[0]
+        token_strs = [model.to_string([t]) for t in token_ids]
 
-    results = scanner.scan_tokens(req.inputs, on_progress=on_progress)
+        layer_acts: dict[int, torch.Tensor] = {}
+
+        def make_hook(layer_idx):
+            def hook(value, hook):
+                layer_acts[layer_idx] = value[0].detach()
+                return value
+            return hook
+
+        hooks = [(lid, make_hook(i)) for i, lid in enumerate(layerIDs)]
+        model.run_with_hooks(tokens, fwd_hooks=hooks)
+
+        token_data = []
+        for tok_idx, tok_str in enumerate(token_strs):
+            layers = [
+                [v.item() for v in layer_acts[layer_idx][tok_idx]]
+                for layer_idx in range(len(layerIDs))
+            ]
+            token_data.append({"token": tok_str, "data": layers})
+
+        all_results.append(token_data)
 
     with scan_lock:
         token_scan_state.update({
             "running": False,
             "done": True,
-            "results": results,
+            "results": all_results,
         })
 
 @app.get("/scan_progress")
@@ -137,10 +154,10 @@ def get_scan_progress():
 
 
 class SaveProfileRequest(BaseModel):
-    biases: list[dict]
+    biases:list[dict]
 
 @app.post("/save_profile")
-def save_profile(req: SaveProfileRequest):
+def save_profile(req:SaveProfileRequest):
     from fastapi.responses import Response
     biases = []
     for b in req.biases:
@@ -158,7 +175,7 @@ def save_profile(req: SaveProfileRequest):
     return Response(content=buf.getvalue(), media_type="application/octet-stream")
 
 @app.post("/load_profile")
-async def load_profile(file: UploadFile = File(...)):
+async def load_profile(file:UploadFile = File(...)):
     contents = await file.read()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".npbp") as tmp:
         tmp.write(contents)
@@ -186,7 +203,7 @@ class SeparationQualityRequest(BaseModel):
     skip_tokens:list[str] = []
 
 @app.post("/separation_quality")
-def separation_quality(req: SeparationQualityRequest):
+def separation_quality(req:SeparationQualityRequest):
     if model is None:
         return {"error": "Model not loaded"}
     layerIDs = [f"blocks.{i}.hook_resid_pre" for i in range(model.cfg.n_layers)]
@@ -319,3 +336,145 @@ def logit_lens(req:LogitLensRequest):
         results.append({"layer": i, "top": top})
 
     return {"layers": results}
+
+
+
+
+
+inference_state = {
+    "running": False,
+    "done": False,
+    "cancelled": False,
+    "tokens": [],
+    "logit_lens": [],
+    "prompt_length": 0,
+}
+
+class InferenceBias(BaseModel):
+    vector:list[float]
+    bias:float
+    layer:int
+    name:str
+    condition:str = ""
+
+class InferenceRequest(BaseModel):
+    prompt:str
+    biases:list[InferenceBias]
+    max_tokens:int | None = None
+
+@app.post("/inference")
+async def inference(req:InferenceRequest):
+    if model is None:
+        return {"error": "Model not loaded"}
+    if inference_state["running"]:
+        return {"error": "Inference already running"}
+
+    with scan_lock:
+        inference_state.update({
+            "running": True,
+            "done": False,
+            "cancelled": False,
+            "tokens": [],
+            "logit_lens": [],
+            "prompt_length": 0,
+        })
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, _inference_sync, req)
+    return {"started": True}
+
+@app.post("/inference_cancel")
+def inference_cancel():
+    with scan_lock:
+        if not inference_state["running"]:
+            return {"error": "No inference running"}
+        inference_state["cancelled"] = True
+    return {"cancelled": True}
+
+@app.get("/inference_progress")
+def inference_progress():
+    with scan_lock:
+        return {
+            "running": inference_state["running"],
+            "done": inference_state["done"],
+            "cancelled": inference_state["cancelled"],
+            "tokens": inference_state["tokens"],
+            "logit_lens": inference_state["logit_lens"],
+            "prompt_length": inference_state["prompt_length"],
+        }
+
+def _inference_sync(req:InferenceRequest):
+    feature_biases = []
+    for b in req.biases:
+        fb = NPFeatureBias(
+            vector=torch.tensor(b.vector, dtype=torch.float16).to(model.cfg.device),
+            bias=b.bias,
+            layer=b.layer,
+            name=b.name,
+            condition=b.condition or None,
+        )
+        feature_biases.append(fb)
+
+    steerer = NPSteerer(feature_biases)
+    steerer.hookOnModel(model, unhook=False)
+
+    try:
+        tokens = model.to_tokens(req.prompt)
+        prompt_length = tokens.shape[1]
+
+        with scan_lock:
+            inference_state["prompt_length"] = prompt_length
+
+        max_tokens = req.max_tokens if req.max_tokens is not None else 200
+        layerIDs = [f"blocks.{i}.hook_resid_pre" for i in range(model.cfg.n_layers)]
+
+        for _ in range(max_tokens):
+            with scan_lock:
+                if inference_state["cancelled"]:
+                    break
+
+            layer_acts:dict[int, torch.Tensor] = {}
+
+            def make_lens_hook(layer_idx):
+                def hook(value, hook):
+                    layer_acts[layer_idx] = value[0, -1].detach().float()
+                    return value
+                return hook
+
+            lens_hooks = [(lid, make_lens_hook(i)) for i, lid in enumerate(layerIDs)]
+
+            with torch.no_grad():
+                logits = model.run_with_hooks(tokens, fwd_hooks=lens_hooks)
+
+            next_token_logits = logits[0, -1]
+            next_token = next_token_logits.argmax(dim=-1).unsqueeze(0).unsqueeze(0)
+            token_str = model.to_string([next_token.item()])
+
+            layer_preds = []
+            for i in range(model.cfg.n_layers):
+                resid = layer_acts[i].unsqueeze(0)
+                resid_normed = model.ln_final(resid)
+                layer_logits = model.unembed(resid_normed)[0]
+                probs = torch.softmax(layer_logits, dim=-1)
+                topk = torch.topk(probs, 3)
+                top = [
+                    {"token": model.to_string([topk.indices[j].item()]), "prob": topk.values[j].item()}
+                    for j in range(3)
+                ]
+                layer_preds.append({"layer": i, "top": top})
+
+            with scan_lock:
+                inference_state["tokens"].append(token_str)
+                inference_state["logit_lens"].append(layer_preds)
+
+            tokens = torch.cat([tokens, next_token], dim=1)
+
+            eos_id = model.tokenizer.eos_token_id
+            if eos_id is not None and next_token.item() == eos_id:
+                break
+
+    finally:
+        steerer.unhookFromModel()
+        with scan_lock:
+            inference_state["running"] = False
+            inference_state["done"] = True

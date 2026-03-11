@@ -1,141 +1,184 @@
 import NPWindow from "./elements/NPWindow"
-import { useState, useEffect, useRef } from "react"
+import React, { useRef } from "react"
 
 type LayerPrediction = {
-    layer:number
-    top:{ token:string, prob:number }[]
+    layer: number
+    top: { token: string, prob: number }[]
 }
 
-function AnimatedArrow() {
-    const [offset, setOffset] = useState(0)
-    useEffect(() => {
-        let frame:number
-        let start:number | null = null
-        const animate = (ts:number) => {
-            if (!start) start = ts
-            const elapsed = (ts - start) % 1200
-            setOffset(elapsed / 1200)
-            frame = requestAnimationFrame(animate)
-        }
-        frame = requestAnimationFrame(animate)
-        return () => cancelAnimationFrame(frame)
-    }, [])
+const COL_W = 110
+const ARROW_W = 24
+const LABEL_H = 16
+const CHIP_H = 20
+const CHIP_GAP = 4
+const CARD_H = 32
+const TOPBAR_H = 32
+const PADDING_V = 24
+const SCROLLBAR_H = 8
+const LABEL_CHIPS_GAP = 6
+const MIN_CARD_GAP = 8
+const EXTRA = 32  // breathing room below cards
 
-    const dots = [0, 0.33, 0.66]
-    return (
-        <div style={{ display: "flex", alignItems: "center", gap: "2px", padding: "0 4px", flexShrink: 0 }}>
-            {dots.map((phase, i) => {
-                const t = ((offset + phase) % 1)
-                const opacity = 0.15 + 0.85 * Math.sin(t * Math.PI)
-                return (
-                    <div key={i} style={{
-                        width: "4px",
-                        height: "4px",
-                        borderRadius: "50%",
-                        background: "#5a5a5a",
-                        opacity,
-                        transition: "opacity 0.05s"
-                    }} />
-                )
-            })}
-        </div>
-    )
-}
-
-function TokenCard({ token, prob }: { token:string, prob:number }) {
+function TokenCard({ token, prob }: { token: string, prob: number }) {
     return (
         <div style={{
+            width: COL_W - 10,
+            flexShrink: 0,
+            flexGrow: 0,
             display: "flex",
             flexDirection: "column",
             gap: "3px",
-            opacity: 1,
-            transition: "opacity 0.2s"
         }}>
             <div style={{
                 background: "#252525",
-                border: `1px solid #3a3a3a`,
+                border: "1px solid #3a3a3a",
                 borderRadius: "4px",
                 padding: "3px 7px",
                 fontFamily: "monospace",
                 fontSize: "0.8rem",
                 color: "#DDD",
                 whiteSpace: "nowrap",
-                maxWidth: "100px",
+                width: "100%",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
-                textAlign: "center"
+                textAlign: "center",
+                boxSizing: "border-box",
             }}>
-                {token.trim() == "" ? "⠀" : token}
+                {token.trim() === "" ? "⠀" : token}
             </div>
-            <div style={{ height: "3px", background: "#1a1a1a", borderRadius: "2px", overflow: "hidden" }}>
+            <div style={{ height: "4px", width: COL_W - 10, flexShrink: 0, background: "#1a1a1a", borderRadius: "2px", overflow: "hidden" }}>
                 <div style={{
                     height: "100%",
                     width: `${Math.round(prob * 100)}%`,
                     background: `hsl(${120 * prob}, 60%, 45%)`,
                     borderRadius: "2px",
-                    transition: "width 0.3s ease"
+                    transition: "width 0.3s ease",
                 }} />
             </div>
         </div>
     )
 }
 
-function LayerBlock({ layer, predictions, isLast }: {
-    layer:number
-    predictions:{ token:string, prob:number }[]
-    isLast:boolean
-}) {
-
-    return (
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
-                <span style={{ color: "#444", fontSize: "0.65rem", fontFamily: "monospace", marginBottom: "2px" }}>
-                    L{layer}
-                </span>
-                {predictions.map((p, i) => (
-                    <TokenCard key={i} token={p.token} prob={p.prob}/>
-                ))}
-            </div>
-            {!isLast && <AnimatedArrow />}
-        </div>
-    )
-}
-
-function LogitLensWindow({ onClose, token, layers }: {
-    onClose:() => void
-    token:string
-    layers:LayerPrediction[]
+function LogitLensWindow({ onClose, token, layers, layerSublabels }: {
+    onClose: () => void
+    token: string
+    layers: LayerPrediction[]
+    layerSublabels?: Record<number, React.ReactNode>
 }) {
     const scrollRef = useRef<HTMLDivElement>(null)
+    const numLayers = layers.length
+    const numCards = layers[0]?.top.length ?? 3
+
+    const getChips = (layerIndex: number): React.ReactNode[] => {
+        const sublabel = layerSublabels?.[layers[layerIndex].layer]
+        if (!sublabel) return []
+        const children = ((sublabel as React.ReactElement)?.props as any)?.children
+        return Array.isArray(children) ? children : [children]
+    }
+
+    const maxChips = Math.max(0, ...layers.map((_, i) => getChips(i).length))
+
+    // Window height = tallest column:
+    // label + gap + maxChips * chipH + (maxChips-1)*chipGap + (if chips) gap + numCards*cardH + extra
+    const tallestColH =
+        LABEL_H +
+        LABEL_CHIPS_GAP +
+        (maxChips > 0 ? maxChips * CHIP_H + (maxChips - 1) * CHIP_GAP + LABEL_CHIPS_GAP : 0) +
+        numCards * CARD_H +
+        (numCards - 1) * MIN_CARD_GAP +
+        EXTRA
+
+    const windowHeight = TOPBAR_H + PADDING_V + tallestColH + SCROLLBAR_H
+    const totalWidth = numLayers * COL_W + (numLayers - 1) * ARROW_W
 
     return (
         <NPWindow
             name={`Logit Lens: "${token}"`}
             onClose={onClose}
-            defaultSize={{ width: Math.min(window.innerWidth - 40, 900), height: 220 }}
-            bounds={() => ({ x: 0, y: 35, w: window.innerWidth, h: window.innerHeight - 35 })}
+            defaultSize={{ width: 900, height: windowHeight }}
             fitToBounds={true}
         >
+            {/* Single row of fully self-contained columns + arrows.
+                alignItems stretch makes every column the same total height.
+                Each column manages its own label, chips, and card gaps. */}
             <div
                 ref={scrollRef}
                 style={{
                     display: "flex",
                     flexDirection: "row",
                     alignItems: "flex-start",
+                    boxSizing: "border-box",
+                    paddingBottom: SCROLLBAR_H,
                     overflowX: "auto",
                     overflowY: "hidden",
-                    paddingBottom: "6px",
-                    gap: "0px"
                 }}
             >
-                {layers.map((layer, i) => (
-                    <LayerBlock
-                        key={layer.layer}
-                        layer={layer.layer}
-                        predictions={layer.top}
-                        isLast={i === layers.length - 1}
-                    />
-                ))}
+                {layers.map((layer, i) => {
+                    const chips = getChips(i)
+                    return (
+                        <React.Fragment key={layer.layer}>
+                            <div style={{
+                                width: COL_W,
+                                height: tallestColH,
+                                flexShrink: 0,
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                justifyContent: "flex-start",
+                            }}>
+                                {/* Label */}
+                                <div style={{ height: LABEL_H, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <span style={{ color: "#444", fontSize: "0.65rem", fontFamily: "monospace" }}>
+                                        L{layer.layer}
+                                    </span>
+                                </div>
+
+                                <div style={{ height: LABEL_CHIPS_GAP, flexShrink: 0 }} />
+
+                                {/* Chips */}
+                                {chips.length > 0 && (
+                                    <>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: CHIP_GAP, flexShrink: 0, alignItems: "center" }}>
+                                            {chips.map((chip, ci) => (
+                                                <div key={ci} style={{ height: CHIP_H, display: "flex", alignItems: "center" }}>
+                                                    {chip}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div style={{ height: LABEL_CHIPS_GAP, flexShrink: 0 }} />
+                                    </>
+                                )}
+
+                                {/* Top spacer */}
+                                <div style={{ height: (maxChips - chips.length) * (CHIP_H + CHIP_GAP), flexShrink: 0 }} />
+
+                                {/* Cards */}
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: MIN_CARD_GAP, flexShrink: 0 }}>
+                                    {layer.top.map((p, cardIdx) => (
+                                        <TokenCard key={cardIdx} token={p.token} prob={p.prob} />
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Arrow between columns */}
+                            {i < numLayers - 1 && (
+                                <div style={{
+                                    width: ARROW_W,
+                                    height: tallestColH,
+                                    flexShrink: 0,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    color: "#3a3a3a",
+                                    fontSize: "1rem",
+                                    userSelect: "none",
+                                }}>
+                                    →
+                                </div>
+                            )}
+                        </React.Fragment>
+                    )
+                })}
             </div>
         </NPWindow>
     )

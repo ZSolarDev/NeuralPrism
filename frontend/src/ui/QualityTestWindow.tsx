@@ -100,8 +100,6 @@ function QualityTestWindow({ onClose, biases }: {
             name="Quality Test"
             onClose={onClose}
             defaultSize={{ width: 340, height: 160 }}
-            bounds={() => ({ x: 0, y: 35, w: window.innerWidth, h: window.innerHeight - 35 })}
-            fitToBounds={true}
         >
             <span style={{ color: "#555", fontSize: "0.85rem" }}>No biases loaded. Scan something first.</span>
         </NPWindow>
@@ -114,7 +112,6 @@ function QualityTestWindow({ onClose, biases }: {
             name="Quality Test"
             onClose={onClose}
             defaultSize={{ width: 340, height: 560 }}
-            bounds={() => ({ x: 0, y: 35, w: window.innerWidth, h: window.innerHeight - 35 })}
             fitToBounds={true}
         >
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>

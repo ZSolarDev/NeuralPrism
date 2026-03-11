@@ -57,7 +57,8 @@ class NPSteerer:
                     resid = input[0]
                     for bias in fBiases:
                         if bias.condition is None or self.evaluate_condition(bias.condition, self.biases, resid):
-                            output += bias.vector * 0.5
+                            output += bias.vector * bias.bias
+                            print(f"Steering {bias.name} on layer {layer} by {bias.bias}")
                     return output
                 return hook
             self.curHandles.append(

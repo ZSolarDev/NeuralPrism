@@ -16,12 +16,6 @@ export class FeatureBias {
     public layer_diffs:number[][] = []
 }
 
-export enum Task {
-    LoadingModel = "Loading Model",
-    LoadingModelInfo = "Loading Model Info",
-    Scanning = "Scanning"
-}
-
 export type SeparationQuality = {
     quality:number
     avg_pos:number
@@ -38,12 +32,6 @@ export type TokenActivationResult = {
 export type LayerPrediction = {
     layer:number
     top:{ token:string, prob:number }[]
-}
-
-export type TaskHandle = {
-    id:number
-    type:Task
-    active:boolean
 }
 
 export type ScanResult = {
@@ -66,68 +54,20 @@ export type ScanProgress = {
 
 export type ScanProgressCallback = (progress:ScanProgress) => void
 
-export class Busy {
-    public currentTasks:Map<number, Task> = new Map()
-    private _isBusy:boolean = false;
-    public async isBusy(stall:boolean = false) {
-        let getStatus = (async () => {
-            const res = await fetch("http://localhost:8000/status")
-            const data = await res.json()
-            this._isBusy = !data.complete
-        });
-        if (stall) await getStatus(); else getStatus()
-        return this._isBusy
-    }
-
-    public hasTask(task:Task):boolean {
-        return [...this.currentTasks.values()].some(t => t === task);
-    }
-
-    public async waitTilNotBusy() {
-        const res = await fetch("http://localhost:8000/status")
-        const data = await res.json()
-        while (!data.complete) await new Promise(r => setTimeout(r, 500))
-    }
-
-    public addTask(task:Task):TaskHandle {
-        this.currentTasks.set(this.currentTasks.size + 1, task)
-        return {
-            id: this.currentTasks.size + 1,
-            type: task,
-            active: true
-        }
-    }
-
-    public removeTask(task:TaskHandle) {
-        this.currentTasks.delete(task.id)
-        task.active = false
-    }
-}
-
 export class Client {
-    public static busy:Busy = new Busy()
     public static model:Model = new Model()
 
     public static async loadModel(model_name:string) {
         await fetch("http://localhost:8000/load_model", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({model_name: model_name})
+            body: JSON.stringify({model_name})
         })
         Client.model.name = model_name
         Client.model.loaded = true
     }
 
-    public static loadModelWithHandle(model_name:string):TaskHandle {
-        let handle = Client.busy.addTask(Task.LoadingModel);
-        (async () => {
-            await Client.loadModel(model_name)
-            Client.busy.removeTask(handle)
-        })()
-        return handle
-    }
-
-    public static async getModelInfo(){
+    public static async getModelInfo() {
         const result = await fetch("http://localhost:8000/model_info")
         const data = await result.json()
         Client.model.loaded = data.loaded
@@ -135,15 +75,6 @@ export class Client {
         Client.model.name = data.model_name
         Client.model.numLayers = data.num_layers
         Client.model.neuronsPerLayer = data.neurons_per_layer
-    }
-
-    public static getModelInfoWithHandle():TaskHandle {
-        let handle = Client.busy.addTask(Task.LoadingModelInfo);
-        (async () => {
-            await Client.getModelInfo()
-            Client.busy.removeTask(handle)
-        })()
-        return handle
     }
 
     public static async scan(
@@ -154,24 +85,18 @@ export class Client {
         onProgress?:ScanProgressCallback,
         pollInterval:number = 200
     ):Promise<ScanResult> {
-        if (!Client.model.loaded)
-            throw new Error("Model not loaded")
+        if (!Client.model.loaded) throw new Error("Model not loaded")
 
         await fetch("http://localhost:8000/scan", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({
-                name,
-                pos_inputs: posInputs,
-                neg_inputs: negInputs,
-                bias
-            })
+            body: JSON.stringify({ name, pos_inputs: posInputs, neg_inputs: negInputs, bias })
         })
 
         while (true) {
             await new Promise(r => setTimeout(r, pollInterval))
             const res = await fetch("http://localhost:8000/scan_progress")
-            const progress: ScanProgress = await res.json()
+            const progress:ScanProgress = await res.json()
             onProgress?.(progress)
             if (progress.done) {
                 return {
@@ -182,24 +107,6 @@ export class Client {
                 }
             }
         }
-    }
-
-    public static scanWithHandle(
-        name:string,
-        posInputs:string[],
-        negInputs:string[],
-        bias:number = 0.0,
-        onProgress?:ScanProgressCallback
-    ):{ handle:TaskHandle; result:Promise<ScanResult> } {
-        const handle = Client.busy.addTask(Task.Scanning)
-        const result = (async () => {
-            try {
-                return await Client.scan(name, posInputs, negInputs, bias, onProgress)
-            } finally {
-                Client.busy.removeTask(handle)
-            }
-        })()
-        return { handle, result }
     }
 
     public static async saveProfile(biases:FeatureBias[]):Promise<void> {
@@ -267,19 +174,21 @@ export class Client {
 
     public static async tokenActivations(
         inputs:string[],
-        onProgress?:(current:number, total:number) => void,
+        onTotalTokens?:(total:number) => void,
         pollInterval:number = 200
     ):Promise<TokenActivationResult[][]> {
-        await fetch("http://localhost:8000/token_activations", {
+        const startRes = await fetch("http://localhost:8000/token_activations", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({ inputs })
         })
+        const startData = await startRes.json()
+        onTotalTokens?.(startData.total_tokens ?? 0)
+
         while (true) {
             await new Promise(r => setTimeout(r, pollInterval))
             const res = await fetch("http://localhost:8000/token_activations_progress")
             const data = await res.json()
-            onProgress?.(data.current_input, data.total_inputs)
             if (data.done) return data.results as TokenActivationResult[][]
         }
     }
@@ -292,12 +201,46 @@ export class Client {
         const res = await fetch("http://localhost:8000/logit_lens", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ token_index: tokenIndex, input_text: inputText, top_k: topK })
+        })
+        return await res.json()
+    }
+
+    public static async startInference(
+        prompt:string,
+        biases:FeatureBias[],
+        maxTokens:number | null = null
+    ):Promise<void> {
+        await fetch("http://localhost:8000/inference", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
             body: JSON.stringify({
-                token_index: tokenIndex,
-                input_text: inputText,
-                top_k: topK
+                prompt,
+                biases: biases.map(b => ({
+                    vector: b.vector,
+                    bias: b.bias,
+                    layer: b.layer,
+                    name: b.name,
+                    condition: b.condition,
+                })),
+                max_tokens: maxTokens
             })
         })
+    }
+
+    public static async cancelInference():Promise<void> {
+        await fetch("http://localhost:8000/inference_cancel", { method: "POST" })
+    }
+
+    public static async getInferenceProgress():Promise<{
+        running:boolean
+        done:boolean
+        cancelled:boolean
+        tokens:string[]
+        logit_lens:LayerPrediction[][]
+        prompt_length:number
+    }> {
+        const res = await fetch("http://localhost:8000/inference_progress")
         return await res.json()
     }
 }

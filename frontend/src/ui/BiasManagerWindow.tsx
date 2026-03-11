@@ -10,14 +10,11 @@ function BiasManagerWindow({ onClose, biases, onChange }: {
     biases:FeatureBias[]
     onChange:(biases:FeatureBias[]) => void
 }) {
-    const names = biases.map(b => b.name)
-
     return (
         <NPWindow
             name="Bias Manager"
             onClose={onClose}
-            defaultSize={{ width: 400, height: 500 }}
-            bounds={() => ({ x: 0, y: 35, w: window.innerWidth, h: window.innerHeight - 35 })}
+            defaultSize={{ width: 400, height: 385 }}
             fitToBounds={true}
         >
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>

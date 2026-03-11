@@ -31,7 +31,6 @@ function ModelLoaderWindow({ onClose, onModelLoad, onError }: {
             name="Load Model"
             onClose={onClose}
             defaultSize={{ width: 300, height: 140 }}
-            bounds={() => ({ x: 0, y: 35, w: window.innerWidth, h: window.innerHeight - 35 })}
             fitToBounds={true}
         >
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>

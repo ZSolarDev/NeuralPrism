@@ -78,7 +78,6 @@ function NameDialog({ defaultName, onConfirm, onCancel }: {
             name="Name Bias"
             onClose={onCancel}
             defaultSize={{ width: 300, height: 130 }}
-            bounds={() => ({ x: 0, y: 35, w: window.innerWidth, h: window.innerHeight - 35 })}
             fitToBounds={true}
         >
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -106,11 +105,12 @@ function NameDialog({ defaultName, onConfirm, onCancel }: {
     )
 }
 
-function TokenActivationWindow({ onClose, biases, onBiasesChange, onActivationsUpdate }: {
+function TokenActivationWindow({ onClose, biases, onBiasesChange, onActivationsUpdate, onRestoreActivations }: {
     onClose:() => void
     biases:FeatureBias[]
     onBiasesChange:(biases:FeatureBias[]) => void
     onActivationsUpdate:(activations:number[][], highestLayer:number) => void
+    onRestoreActivations:() => void
 }) {
     const [input, setInput] = useState("")
     const [running, setRunning] = useState(false)
@@ -122,23 +122,28 @@ function TokenActivationWindow({ onClose, biases, onBiasesChange, onActivationsU
     const [confirmReplace, setConfirmReplace] = useState<{ name:string, tokenData:number[][] } | null>(null)
     const [logitLens, setLogitLens] = useState<{ token:string, layers:LayerPrediction[] } | null>(null)
     const [loadingLens, setLoadingLens] = useState(false)
+    const [totalTokens, setTotalTokens] = useState<number | null>(null)
 
+    const handleClose = () => {
+        onRestoreActivations()
+        onClose()
+    }
+    
     const run = async () => {
         if (running || !input.trim()) return
         setRunning(true)
         setResults(null)
         setSelection([])
         setLogitLens(null)
-        setProgress({ current: 0, total: 1 })
+        setTotalTokens(null)
         try {
             const res = await Client.tokenActivations(
                 [input.trim()],
-                (current, total) => setProgress({ current, total })
+                (total) => setTotalTokens(total)
             )
             setResults(res[0])
         } finally {
             setRunning(false)
-            setProgress(null)
         }
     }
 
@@ -229,9 +234,8 @@ function TokenActivationWindow({ onClose, biases, onBiasesChange, onActivationsU
     return (
         <NPWindow
             name="Token Activations"
-            onClose={onClose}
-            defaultSize={{ width: 420, height: 560 }}
-            bounds={() => ({ x: 0, y: 35, w: window.innerWidth, h: window.innerHeight - 35 })}
+            onClose={handleClose}
+            defaultSize={{ width: 420, height: 300 }}
             fitToBounds={true}
         >
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -252,7 +256,11 @@ function TokenActivationWindow({ onClose, biases, onBiasesChange, onActivationsU
                         className="focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-white"
                     />
                     <NPButton onClick={run} disabled={running || !input.trim()}>
-                        {running ? `${progress?.current ?? 0}/${progress?.total ?? "?"}` : "Run"}
+                        {running
+                            ? totalTokens !== null
+                                ? `Running through ${totalTokens} tokens`
+                                : "Running..."
+                            : "Run"}
                     </NPButton>
                 </div>
 
@@ -283,6 +291,8 @@ function TokenActivationWindow({ onClose, biases, onBiasesChange, onActivationsU
                                         onMouseEnter={() => setHoveredToken(i)}
                                         onMouseLeave={() => setHoveredToken(null)}
                                         style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
                                             padding: "2px 5px",
                                             borderRadius: "3px",
                                             fontSize: "0.85rem",

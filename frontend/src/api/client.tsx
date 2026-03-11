@@ -54,17 +54,47 @@ export type ScanProgress = {
 
 export type ScanProgressCallback = (progress:ScanProgress) => void
 
+export type LoadModelOptions = {
+    backend?:"hf" | "transformerlens"
+    device?:string
+    dtype?:string
+    layerPath?:string
+    normPath?:string
+    lmHeadPath?:string
+}
+
+export type LoadModelResult =
+    | { ok:true }
+    | { ok:false, error:"unknown_architecture", modelType:string, discovered:string[] }
+    | { ok:false, error:string }
+
 export class Client {
     public static model:Model = new Model()
 
-    public static async loadModel(model_name:string) {
-        await fetch("http://localhost:8000/load_model", {
+    public static async loadModel(modelName:string, opts:LoadModelOptions = {}):Promise<LoadModelResult> {
+        const res = await fetch("http://localhost:8000/load_model", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({model_name})
+            body: JSON.stringify({
+                model_name: modelName,
+                backend: opts.backend ?? "hf",
+                device: opts.device ?? "cuda",
+                dtype: opts.dtype ?? "float16",
+                layer_path: opts.layerPath ?? "",
+                norm_path: opts.normPath ?? "",
+                lm_head_path: opts.lmHeadPath ?? "",
+            })
         })
-        Client.model.name = model_name
+        const data = await res.json()
+        if (data.error === "unknown_architecture") {
+            return { ok: false, error: "unknown_architecture", modelType: data.model_type, discovered: data.discovered }
+        }
+        if (data.error) {
+            return { ok: false, error: data.error }
+        }
+        Client.model.name = modelName
         Client.model.loaded = true
+        return { ok: true }
     }
 
     public static async getModelInfo() {

@@ -6,11 +6,11 @@ import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 
 type InferenceToken = {
-    token: string
-    logitLens: LayerPrediction[]
+    token:string
+    logitLens:LayerPrediction[]
 }
 
-function BiasChip({ name }: { name: string }) {
+function BiasChip({ name }:{ name:string }) {
     const [hovered, setHovered] = useState(false)
     return (
         <div
@@ -40,9 +40,9 @@ function BiasChip({ name }: { name: string }) {
 }
 
 function InferenceStatusWindow({ onClose, biases, prompt }: {
-    onClose: () => void
-    biases: FeatureBias[]
-    prompt: string
+    onClose:() => void
+    biases:FeatureBias[]
+    prompt:string
 }) {
     const [tokens, setTokens] = useState<InferenceToken[]>([])
     const [running, setRunning] = useState(true)
@@ -94,7 +94,7 @@ function InferenceStatusWindow({ onClose, biases, prompt }: {
 
     const statusColor = cancelling || cancelled ? "#F44336" : running ? "#4CAF50" : "#7C7C7C"
 
-    const biasLayerSublabels: Record<number, React.ReactNode> = {}
+    const biasLayerSublabels:Record<number, React.ReactNode> = {}
     for (const bias of biases) {
         const layer = bias.layer
         const existing = biasLayerSublabels[layer]

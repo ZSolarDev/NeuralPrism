@@ -1,7 +1,8 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
-from transformer_lens import HookedTransformer
+from nphfadapter import NPHFAdapter, UnknownArchitectureError
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from npprofile import NPProfile
@@ -44,18 +45,48 @@ scan_progress = {
 
 class LoadModelRequest(BaseModel):
     model_name:str
+    backend:str = "hf"
+    device:str = "cuda"
+    dtype:str = "float16"
+    layer_path:str = ""
+    norm_path:str = ""
+    lm_head_path:str = ""
 
 @app.post("/load_model")
 async def load_model(req:LoadModelRequest):
-    global curModelName
+    global curModelName, model
     curModelName = req.model_name
-    global model
-    model = HookedTransformer.from_pretrained(
-        req.model_name,
-        trust_remote_code=True,
-        device="cuda",
-        dtype="float16"
-    )
+    if req.backend == "transformerlens":
+        try:
+            from transformer_lens import HookedTransformer
+            model = HookedTransformer.from_pretrained(
+                req.model_name,
+                trust_remote_code=True,
+                device=req.device,
+                dtype=req.dtype,
+            )
+        except Exception as e:
+            return {"error": str(e)}
+    else:
+        try:
+            model = NPHFAdapter.from_pretrained(
+                req.model_name,
+                device=req.device,
+                dtype=req.dtype,
+                layer_path=req.layer_path or None,
+                norm_path=req.norm_path or None,
+                lm_head_path=req.lm_head_path or None,
+            )
+        except UnknownArchitectureError as e:
+            return {
+                "error": "unknown_architecture",
+                "model_type": e.model_type,
+                "discovered": e.discovered,
+                "message": str(e),
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    return {"ok": True}
 
 @app.get("/model_info")
 def model_info():
@@ -68,7 +99,7 @@ def model_info():
         "num_layers": cfg.n_layers,
         "neurons_per_layer": [cfg.d_model] * cfg.n_layers
     }
-    
+
 token_scan_state = {
     "running": False,
     "done": False,
@@ -119,7 +150,7 @@ def _token_activations_sync(req:TokenActivationRequest):
         token_ids = tokens[0]
         token_strs = [model.to_string([t]) for t in token_ids]
 
-        layer_acts: dict[int, torch.Tensor] = {}
+        layer_acts:dict[int, torch.Tensor] = {}
 
         def make_hook(layer_idx):
             def hook(value, hook):
@@ -158,7 +189,6 @@ class SaveProfileRequest(BaseModel):
 
 @app.post("/save_profile")
 def save_profile(req:SaveProfileRequest):
-    from fastapi.responses import Response
     biases = []
     for b in req.biases:
         fb = NPFeatureBias(
@@ -169,7 +199,6 @@ def save_profile(req:SaveProfileRequest):
             condition=b["condition"] or None,
         )
         biases.append(fb)
-    
     buf = io.BytesIO()
     NPProfile(biases).save(buf)
     return Response(content=buf.getvalue(), media_type="application/octet-stream")
@@ -294,7 +323,7 @@ def _scan_sync(req:ScanRequest):
         "vector": final_vec,
         "name": req.name,
     }
-    
+
 class LogitLensRequest(BaseModel):
     token_index:int
     input_text:str
@@ -327,18 +356,12 @@ def logit_lens(req:LogitLensRequest):
         probs = torch.softmax(logits, dim=-1)
         topk = torch.topk(probs, req.top_k)
         top = [
-            {
-                "token": model.to_string([topk.indices[j].item()]),
-                "prob": topk.values[j].item()
-            }
+            {"token": model.to_string([topk.indices[j].item()]), "prob": topk.values[j].item()}
             for j in range(req.top_k)
         ]
         results.append({"layer": i, "top": top})
 
     return {"layers": results}
-
-
-
 
 
 inference_state = {

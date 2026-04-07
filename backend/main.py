@@ -9,6 +9,7 @@ from npprofile import NPProfile
 from npscanner import FeatureBias as NPFeatureBias, NPScanner
 from npsteerer import NPSteerer
 import torch
+import torch.nn.functional as F
 import io
 import logging
 import threading
@@ -44,18 +45,22 @@ scan_progress = {
 
 
 class LoadModelRequest(BaseModel):
-    model_name:str
-    backend:str = "hf"
-    device:str = "cuda"
-    dtype:str = "float16"
-    layer_path:str = ""
-    norm_path:str = ""
-    lm_head_path:str = ""
+    model_name: str
+    backend: str = "hf"
+    device: str = "cuda"
+    dtype: str = "float16"
+    layer_path: str = ""
+    norm_path: str = ""
+    lm_head_path: str = ""
+    hf_token: str = ""
 
 @app.post("/load_model")
-async def load_model(req:LoadModelRequest):
+async def load_model(req: LoadModelRequest):
     global curModelName, model
     curModelName = req.model_name
+    if req.hf_token:
+        from huggingface_hub import login
+        login(req.hf_token)
     if req.backend == "transformerlens":
         try:
             from transformer_lens import HookedTransformer
@@ -108,10 +113,10 @@ token_scan_state = {
 }
 
 class TokenActivationRequest(BaseModel):
-    inputs:list[str]
+    inputs: list[str]
 
 @app.post("/token_activations")
-async def token_activations(req:TokenActivationRequest):
+async def token_activations(req: TokenActivationRequest):
     if model is None:
         return {"error": "Model not loaded"}
     if token_scan_state["running"]:
@@ -141,7 +146,7 @@ def token_activations_progress():
             "results": token_scan_state["results"],
         }
 
-def _token_activations_sync(req:TokenActivationRequest):
+def _token_activations_sync(req: TokenActivationRequest):
     layerIDs = [f"blocks.{i}.hook_resid_pre" for i in range(model.cfg.n_layers)]
     all_results = []
 
@@ -150,7 +155,7 @@ def _token_activations_sync(req:TokenActivationRequest):
         token_ids = tokens[0]
         token_strs = [model.to_string([t]) for t in token_ids]
 
-        layer_acts:dict[int, torch.Tensor] = {}
+        layer_acts: dict[int, torch.Tensor] = {}
 
         def make_hook(layer_idx):
             def hook(value, hook):
@@ -185,10 +190,10 @@ def get_scan_progress():
 
 
 class SaveProfileRequest(BaseModel):
-    biases:list[dict]
+    biases: list[dict]
 
 @app.post("/save_profile")
-def save_profile(req:SaveProfileRequest):
+def save_profile(req: SaveProfileRequest):
     biases = []
     for b in req.biases:
         fb = NPFeatureBias(
@@ -204,7 +209,7 @@ def save_profile(req:SaveProfileRequest):
     return Response(content=buf.getvalue(), media_type="application/octet-stream")
 
 @app.post("/load_profile")
-async def load_profile(file:UploadFile = File(...)):
+async def load_profile(file: UploadFile = File(...)):
     contents = await file.read()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".npbp") as tmp:
         tmp.write(contents)
@@ -225,14 +230,14 @@ async def load_profile(file:UploadFile = File(...)):
 
 
 class SeparationQualityRequest(BaseModel):
-    vector:list[float]
-    layer:int
-    pos_inputs:list[str]
-    neg_inputs:list[str]
-    skip_tokens:list[str] = []
+    vector: list[float]
+    layer: int
+    pos_inputs: list[str]
+    neg_inputs: list[str]
+    skip_tokens: list[str] = []
 
 @app.post("/separation_quality")
-def separation_quality(req:SeparationQualityRequest):
+def separation_quality(req: SeparationQualityRequest):
     if model is None:
         return {"error": "Model not loaded"}
     layerIDs = [f"blocks.{i}.hook_resid_pre" for i in range(model.cfg.n_layers)]
@@ -255,14 +260,14 @@ def separation_quality(req:SeparationQualityRequest):
 
 
 class ScanRequest(BaseModel):
-    pos_inputs:list[str]
-    neg_inputs:list[str]
-    skip_tokens:list[str] = ["<|endoftext|>"]
-    bias:float = 1.0
-    name:str = "Unnamed"
+    pos_inputs: list[str]
+    neg_inputs: list[str]
+    skip_tokens: list[str] = []
+    bias: float = 1.0
+    name: str = "Unnamed"
 
 @app.post("/scan")
-async def scan(req:ScanRequest):
+async def scan(req: ScanRequest):
     if model is None:
         return {"error": "Model not loaded"}
     if scan_progress["running"]:
@@ -285,7 +290,7 @@ async def scan(req:ScanRequest):
     return {"started": True}
 
 
-def _on_progress(current_input:int, total_inputs:int, diffs:list, highest_layer:int, highest_vec:list):
+def _on_progress(current_input: int, total_inputs: int, diffs: list, highest_layer: int, highest_vec: list):
     with scan_lock:
         scan_progress["current_input"] = current_input
         scan_progress["total_inputs"] = total_inputs
@@ -294,7 +299,7 @@ def _on_progress(current_input:int, total_inputs:int, diffs:list, highest_layer:
         scan_progress["vector"] = highest_vec
 
 
-def _scan_sync(req:ScanRequest):
+def _scan_sync(req: ScanRequest):
     layerIDs = [f"blocks.{i}.hook_resid_pre" for i in range(model.cfg.n_layers)]
     scanner = NPScanner(model=model, layerIDs=layerIDs)
 
@@ -325,19 +330,19 @@ def _scan_sync(req:ScanRequest):
     }
 
 class LogitLensRequest(BaseModel):
-    token_index:int
-    input_text:str
-    top_k:int = 3
+    token_index: int
+    input_text: str
+    top_k: int = 3
 
 @app.post("/logit_lens")
-def logit_lens(req:LogitLensRequest):
+def logit_lens(req: LogitLensRequest):
     if model is None:
         return {"error": "Model not loaded"}
 
     tokens = model.to_tokens(req.input_text)
     layerIDs = [f"blocks.{i}.hook_resid_pre" for i in range(model.cfg.n_layers)]
 
-    layer_acts:dict[int, torch.Tensor] = {}
+    layer_acts: dict[int, torch.Tensor] = {}
 
     def make_hook(layer_idx):
         def hook(value, hook):
@@ -371,22 +376,24 @@ inference_state = {
     "tokens": [],
     "logit_lens": [],
     "prompt_length": 0,
+    "bias_sims": [],
 }
 
 class InferenceBias(BaseModel):
-    vector:list[float]
-    bias:float
-    layer:int
-    name:str
-    condition:str = ""
+    vector: list[float]
+    bias: float
+    layer: int
+    name: str
+    condition: str = ""
 
 class InferenceRequest(BaseModel):
-    prompt:str
-    biases:list[InferenceBias]
-    max_tokens:int | None = None
+    prompt: str
+    biases: list[InferenceBias]
+    max_tokens: int | None = None
+    stop_strings: list[str] = []
 
 @app.post("/inference")
-async def inference(req:InferenceRequest):
+async def inference(req: InferenceRequest):
     if model is None:
         return {"error": "Model not loaded"}
     if inference_state["running"]:
@@ -400,6 +407,7 @@ async def inference(req:InferenceRequest):
             "tokens": [],
             "logit_lens": [],
             "prompt_length": 0,
+            "bias_sims": [],
         })
 
     loop = asyncio.get_event_loop()
@@ -424,9 +432,23 @@ def inference_progress():
             "tokens": inference_state["tokens"],
             "logit_lens": inference_state["logit_lens"],
             "prompt_length": inference_state["prompt_length"],
+            "bias_sims": inference_state["bias_sims"],
         }
 
-def _inference_sync(req:InferenceRequest):
+def _compute_bias_sims(layer_acts: dict[int, torch.Tensor], feature_biases: list[NPFeatureBias]) -> list[float]:
+    sims = []
+    for fb in feature_biases:
+        layer_idx = fb.layer
+        if layer_idx not in layer_acts:
+            sims.append(0.5)
+            continue
+        resid = layer_acts[layer_idx].float()
+        vec = fb.vector.float().to(resid.device)
+        sim = F.cosine_similarity(resid.unsqueeze(0), vec.unsqueeze(0)).item()
+        sims.append((sim + 1.0) / 2.0)
+    return sims
+
+def _inference_sync(req: InferenceRequest):
     feature_biases = []
     for b in req.biases:
         fb = NPFeatureBias(
@@ -440,6 +462,8 @@ def _inference_sync(req:InferenceRequest):
 
     steerer = NPSteerer(feature_biases)
     steerer.hookOnModel(model, unhook=False)
+
+    bias_layers = set(fb.layer for fb in feature_biases)
 
     try:
         tokens = model.to_tokens(req.prompt)
@@ -456,7 +480,7 @@ def _inference_sync(req:InferenceRequest):
                 if inference_state["cancelled"]:
                     break
 
-            layer_acts:dict[int, torch.Tensor] = {}
+            layer_acts: dict[int, torch.Tensor] = {}
 
             def make_lens_hook(layer_idx):
                 def hook(value, hook):
@@ -473,6 +497,9 @@ def _inference_sync(req:InferenceRequest):
             next_token = next_token_logits.argmax(dim=-1).unsqueeze(0).unsqueeze(0)
             token_str = model.to_string([next_token.item()])
 
+            if any(s in token_str for s in req.stop_strings):
+                break
+
             layer_preds = []
             for i in range(model.cfg.n_layers):
                 resid = layer_acts[i].unsqueeze(0)
@@ -486,9 +513,12 @@ def _inference_sync(req:InferenceRequest):
                 ]
                 layer_preds.append({"layer": i, "top": top})
 
+            token_bias_sims = _compute_bias_sims(layer_acts, feature_biases)
+
             with scan_lock:
                 inference_state["tokens"].append(token_str)
                 inference_state["logit_lens"].append(layer_preds)
+                inference_state["bias_sims"].append(token_bias_sims)
 
             tokens = torch.cat([tokens, next_token], dim=1)
 
@@ -501,3 +531,126 @@ def _inference_sync(req:InferenceRequest):
         with scan_lock:
             inference_state["running"] = False
             inference_state["done"] = True
+
+
+# chat template stuff
+PRESET_TEMPLATES = {
+    "gemma": {
+        "name": "Gemma",
+        "user_prefix": "<start_of_turn>user\n",
+        "user_suffix": "<end_of_turn>\n",
+        "assistant_prefix": "<start_of_turn>model\n",
+        "assistant_suffix": "<end_of_turn>\n",
+        "system_prefix": "",
+        "system_suffix": "",
+        "stop_strings": ["<end_of_turn>", "<eos>"],
+    },
+    "llama3": {
+        "name": "Llama 3",
+        "user_prefix": "<|start_header_id|>user<|end_header_id|>\n\n",
+        "user_suffix": "<|eot_id|>",
+        "assistant_prefix": "<|start_header_id|>assistant<|end_header_id|>\n\n",
+        "assistant_suffix": "<|eot_id|>",
+        "system_prefix": "<|start_header_id|>system<|end_header_id|>\n\n",
+        "system_suffix": "<|eot_id|>",
+        "stop_strings": ["<|eot_id|>"],
+    },
+    "mistral": {
+        "name": "Mistral",
+        "user_prefix": "[INST] ",
+        "user_suffix": " [/INST]",
+        "assistant_prefix": "",
+        "assistant_suffix": "</s>",
+        "system_prefix": "",
+        "system_suffix": "",
+        "stop_strings": ["</s>"],
+    },
+    "chatml": {
+        "name": "ChatML",
+        "user_prefix": "<|im_start|>user\n",
+        "user_suffix": "<|im_end|>\n",
+        "assistant_prefix": "<|im_start|>assistant\n",
+        "assistant_suffix": "<|im_end|>\n",
+        "system_prefix": "<|im_start|>system\n",
+        "system_suffix": "<|im_end|>\n",
+        "stop_strings": ["<|im_end|>"],
+    },
+    "phi3": {
+        "name": "Phi-3",
+        "user_prefix": "<|user|>\n",
+        "user_suffix": "<|end|>\n",
+        "assistant_prefix": "<|assistant|>\n",
+        "assistant_suffix": "<|end|>\n",
+        "system_prefix": "<|system|>\n",
+        "system_suffix": "<|end|>\n",
+        "stop_strings": ["<|end|>"],
+    },
+}
+
+def format_chat(messages: list[dict], template: dict) -> str:
+    prompt = ""
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "system":
+            prompt += template["system_prefix"] + content + template["system_suffix"]
+        elif role == "user":
+            prompt += template["user_prefix"] + content + template["user_suffix"]
+        elif role == "assistant":
+            prompt += template["assistant_prefix"] + content + template["assistant_suffix"]
+    prompt += template["assistant_prefix"]
+    return prompt
+
+@app.get("/chat_template")
+def get_chat_template():
+    if model is None:
+        return {"error": "Model not loaded"}
+    try:
+        raw = model.tokenizer.chat_template
+        return {"detected": raw if raw else None, "presets": PRESET_TEMPLATES}
+    except Exception:
+        return {"detected": None, "presets": PRESET_TEMPLATES}
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class InferenceChatRequest(BaseModel):
+    messages: list[ChatMessage]
+    biases: list[InferenceBias]
+    max_tokens: int | None = None
+    template: dict
+
+@app.post("/inference_chat")
+async def inference_chat(req: InferenceChatRequest):
+    if model is None:
+        return {"error": "Model not loaded"}
+    if inference_state["running"]:
+        return {"error": "Inference already running"}
+
+    prompt = format_chat(
+        [{"role": m.role, "content": m.content} for m in req.messages],
+        req.template
+    )
+
+    inference_req = InferenceRequest(
+        prompt=prompt,
+        biases=req.biases,
+        max_tokens=req.max_tokens,
+        stop_strings=req.template.get("stop_strings", [])
+    )
+
+    with scan_lock:
+        inference_state.update({
+            "running": True,
+            "done": False,
+            "cancelled": False,
+            "tokens": [],
+            "logit_lens": [],
+            "prompt_length": 0,
+            "bias_sims": [],
+        })
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, _inference_sync, inference_req)
+    return {"started": True, "prompt": prompt}

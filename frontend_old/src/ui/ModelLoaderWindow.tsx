@@ -19,11 +19,12 @@ function ModelLoaderWindow({ onClose, onModelLoad }: {
     const [layerPath, setLayerPath] = useState("")
     const [normPath, setNormPath] = useState("")
     const [lmHeadPath, setLmHeadPath] = useState("")
+    const [hfToken, setHfToken] = useState("")
 
     const tryLoad = async (opts:LoadModelOptions = {}) => {
         setLoading(true)
         setLoadError(null)
-        const result = await Client.loadModel(modelName, { backend, ...opts })
+        const result = await Client.loadModel(modelName, { backend, hfToken, ...opts })
         setLoading(false)
         if (result.ok) {
             await Client.getModelInfo()
@@ -38,7 +39,7 @@ function ModelLoaderWindow({ onClose, onModelLoad }: {
         setLoadError(result.error)
     }
 
-    const startLoad = () => tryLoad()
+    const startLoad = () => tryLoad({ hfToken })
 
     const retryWithPaths = () => tryLoad({ layerPath, normPath, lmHeadPath })
 
@@ -101,6 +102,14 @@ function ModelLoaderWindow({ onClose, onModelLoad }: {
                     value={modelName}
                     onChange={e => setModelName(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter" && modelName) startLoad() }}
+                    style={{ border: "1px solid #7C7C7C", padding: "4px 8px", fontSize: "0.85rem", backgroundColor: "#252525", height: "31px" }}
+                    className="focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-white"
+                />
+                <Input
+                    placeholder="HuggingFace token..."
+                    value={hfToken}
+                    onChange={e => setHfToken(e.target.value)}
+                    type="password"
                     style={{ border: "1px solid #7C7C7C", padding: "4px 8px", fontSize: "0.85rem", backgroundColor: "#252525", height: "31px" }}
                     className="focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-white"
                 />

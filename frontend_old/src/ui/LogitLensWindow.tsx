@@ -17,7 +17,7 @@ const PADDING_V = 24
 const SCROLLBAR_H = 8
 const LABEL_CHIPS_GAP = 6
 const MIN_CARD_GAP = 8
-const EXTRA = 32  // breathing room below cards
+const EXTRA = 32
 
 function TokenCard({ token, prob }: { token: string, prob: number }) {
     return (
@@ -78,8 +78,6 @@ function LogitLensWindow({ onClose, token, layers, layerSublabels }: {
 
     const maxChips = Math.max(0, ...layers.map((_, i) => getChips(i).length))
 
-    // Window height = tallest column:
-    // label + gap + maxChips * chipH + (maxChips-1)*chipGap + (if chips) gap + numCards*cardH + extra
     const tallestColH =
         LABEL_H +
         LABEL_CHIPS_GAP +
@@ -98,9 +96,6 @@ function LogitLensWindow({ onClose, token, layers, layerSublabels }: {
             defaultSize={{ width: 900, height: windowHeight }}
             fitToBounds={true}
         >
-            {/* Single row of fully self-contained columns + arrows.
-                alignItems stretch makes every column the same total height.
-                Each column manages its own label, chips, and card gaps. */}
             <div
                 ref={scrollRef}
                 style={{

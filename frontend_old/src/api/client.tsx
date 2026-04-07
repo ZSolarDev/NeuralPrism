@@ -52,6 +52,27 @@ export type ScanProgress = {
     name:string
 }
 
+export type ChatTemplate = {
+    name:string
+    user_prefix:string
+    user_suffix:string
+    assistant_prefix:string
+    assistant_suffix:string
+    system_prefix:string
+    system_suffix:string
+    stop_strings:string[]
+}
+
+export type ChatMessage = {
+    role:"user" | "assistant" | "system"
+    content:string
+}
+
+export type ChatTemplateResponse = {
+    detected:string | null
+    presets:Record<string, ChatTemplate>
+}
+
 export type ScanProgressCallback = (progress:ScanProgress) => void
 
 export type LoadModelOptions = {
@@ -61,6 +82,7 @@ export type LoadModelOptions = {
     layerPath?:string
     normPath?:string
     lmHeadPath?:string
+    hfToken?:string
 }
 
 export type LoadModelResult =
@@ -83,6 +105,7 @@ export class Client {
                 layer_path: opts.layerPath ?? "",
                 norm_path: opts.normPath ?? "",
                 lm_head_path: opts.lmHeadPath ?? "",
+                hf_token: opts.hfToken ?? ""
             })
         })
         const data = await res.json()
@@ -113,14 +136,15 @@ export class Client {
         negInputs:string[],
         bias:number = 0.0,
         onProgress?:ScanProgressCallback,
-        pollInterval:number = 200
+        pollInterval:number = 200,
+        skipTokens:string[] = []
     ):Promise<ScanResult> {
         if (!Client.model.loaded) throw new Error("Model not loaded")
 
         await fetch("http://localhost:8000/scan", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ name, pos_inputs: posInputs, neg_inputs: negInputs, bias })
+            body: JSON.stringify({ name, pos_inputs: posInputs, neg_inputs: negInputs, bias, skip_tokens: skipTokens })
         })
 
         while (true) {
@@ -269,8 +293,49 @@ export class Client {
         tokens:string[]
         logit_lens:LayerPrediction[][]
         prompt_length:number
+        bias_sims:number[][]
     }> {
         const res = await fetch("http://localhost:8000/inference_progress")
         return await res.json()
+    }
+
+    public static async getChatTemplate():Promise<ChatTemplateResponse> {
+        const res = await fetch("http://localhost:8000/chat_template")
+        return await res.json()
+    }
+
+    public static async startChatInference(
+        messages:ChatMessage[],
+        template:ChatTemplate,
+        biases:FeatureBias[],
+        maxTokens:number | null = null
+    ):Promise<void> {
+        await fetch("http://localhost:8000/inference_chat", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                messages,
+                template,
+                biases: biases.map(b => ({
+                    vector: b.vector,
+                    bias: b.bias,
+                    layer: b.layer,
+                    name: b.name,
+                    condition: b.condition,
+                })),
+                max_tokens: maxTokens
+            })
+        })
+    }
+    
+    public static async getChatResponse():Promise<string> {
+        while (true) {
+            await new Promise(r => setTimeout(r, 150))
+            const res = await fetch("http://localhost:8000/inference_progress")
+            const data = await res.json()
+            if (data.done || data.cancelled) {
+                return data.tokens.slice(data.prompt_length).join("")
+            }
+        }
     }
 }

@@ -11,6 +11,7 @@ import TokenActivationWindow from "./ui/TokenActivationWindow"
 import InferenceWindow from "./ui/InferenceWindow"
 import InferenceStatusWindow from "./ui/InferenceStatusWindow"
 import Project from "./Project"
+import ChatWindow from "./ui/ChatWindow"
 
 const EMPTY_SCAN:ScanResult = {
     name: "",
@@ -46,6 +47,8 @@ function App() {
     const [scaledActivations, setScaledActivations] = useState(true)
     const [biases, setProjectBiases] = useState(project.biases)
     const [isSteering, setIsSteering] = useState(false)
+    const [chatWindowOpen, setChatWindowOpen] = useState(false)
+    const [chatMessages, setChatMessages] = useState<import("./api/client").ChatMessage[]>([])
 
     const savedScanRes = useRef<ScanResult | null>(null)
     const savedNPerLayerOverride = useRef<number[] | null>(null)
@@ -148,6 +151,12 @@ function App() {
                         >
                             Inference Status
                         </NPButton>
+                        <NPButton
+                            onClick={() => setChatWindowOpen(true)}
+                            disabled={!Client.model.loaded}
+                        >
+                            Chat
+                        </NPButton>
                     </>
                 )}
             </NPTopBar>
@@ -200,6 +209,14 @@ function App() {
                     onClose={() => setInferenceStatusWindowOpen(false)}
                     biases={biases}
                     prompt={inferencePrompt}
+                />
+            )}
+            {chatWindowOpen && (
+                <ChatWindow
+                    onClose={() => setChatWindowOpen(false)}
+                    biases={biases}
+                    messages={chatMessages}
+                    onMessagesChange={setChatMessages}
                 />
             )}
 

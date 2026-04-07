@@ -30,6 +30,7 @@ const [negative, setNegative] = useState([
 ])
     const [scanning, setScanning] = useState(false)
     const [progress, setProgress] = useState<{ current:number, total:number } | null>(null)
+    const [skipTokens, setSkipTokens] = useState<string[]>([])
 
     const startScan = async () => {
         if (scanning) return
@@ -52,7 +53,9 @@ const [negative, setNegative] = useState([
                 }
                 onScanUpdate(lastResult)
                 setProgress({ current: p.current_input, total: p.total_inputs })
-            }
+            },
+            200,
+            skipTokens
         )
 
         if (lastResult !== null) {
@@ -139,9 +142,30 @@ const [negative, setNegative] = useState([
                         />
                     )}
                 />
+                <NPEditableList
+                    label="Skip tokens"
+                    items={skipTokens}
+                    onChange={setSkipTokens}
+                    onAdd={() => ""}
+                    renderItem={(item, _, update) => (
+                        <Input
+                            value={item}
+                            onChange={e => update(e.target.value)}
+                            style={{
+                                border: "1px solid #7C7C7C",
+                                padding: "4px 8px",
+                                fontSize: "0.85rem",
+                                backgroundColor: "#252525",
+                                height: "31px"
+                            }}
+                            className="focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-white"
+                        />
+                    )}
+                />
                 <NPButton onClick={startScan} disabled={scanning || !name.trim()}>
                     {scanning ? `Scanning... input ${progress?.current ?? 0}/${progress?.total ?? "?"}` : "Start scanning"}
                 </NPButton>
+                
             </div>
         </NPWindow>
     )
